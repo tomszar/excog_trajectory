@@ -90,7 +90,7 @@ def run_analysis(args):
     os.makedirs(args.output_dir, exist_ok=True)
 
     print(f"Loading NHANES data for cycle {args.cycle}...")
-    nhanes_data = data.load_nhanes_data(cycle=args.cycle, data_path=args.data_path)
+    nhanes_data = data.load_nhanes_data(data_path=args.data_path)
 
     print("Extracting cognitive assessment data...")
     cognitive_data = data.get_cognitive_data(nhanes_data)
@@ -101,19 +101,28 @@ def run_analysis(args):
     print("Merging cognitive and exposure data...")
     merged_data = data.merge_cognitive_exposure_data(cognitive_data, exposure_data)
 
+    # Remove NaN values from cognitive variables
+    print("Removing NaN values from cognitive variables...")
+    merged_data = data.remove_nan_from_columns(merged_data, 'CFDRIGHT')
+
+    # Remove NaN values from demographic variables
+    print("Removing NaN values from demographic variables...")
+    demographic_vars = ['RIDAGEYR', 'female', 'male', 'black', 'mexican', 'other_hispanic', 'other_eth', 'SES_LEVEL', 'education']
+    merged_data = data.remove_nan_from_columns(merged_data, demographic_vars)
+
     # Save the merged data
     merged_data.to_csv(os.path.join(args.output_dir, "merged_data.csv"), index=False)
     print(f"Merged data saved to {os.path.join(args.output_dir, 'merged_data.csv')}")
 
     # Define variables for analysis
-    outcome_vars = ["CFDDS", "CFDST"]  # Digit Symbol Substitution Test scores
+    cognitive_vars = ["CFDRIGHT"]  # Cognitive function right responses
     exposure_vars = ["LBXBPB", "LBXBCD"]  # Blood lead and cadmium levels
-    covariates = ["RIDAGEYR", "RIAGENDR", "RIDRETH1", "DMDEDUC2"]  # Demographics
+    covariates = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic", "other_eth", "SES_LEVEL", "education"]  # Demographics
 
     print("Running linear models...")
     model_results = analysis.run_linear_models(
         data=merged_data,
-        outcome_vars=outcome_vars,
+        outcome_vars=cognitive_vars,
         exposure_vars=exposure_vars,
         covariates=covariates
     )
@@ -128,7 +137,7 @@ def run_analysis(args):
     print(f"Exposure distributions plot saved to {os.path.join(args.output_dir, 'exposure_distributions.png')}")
 
     # Plot exposure-outcome relationships
-    for outcome_var in outcome_vars:
+    for outcome_var in cognitive_vars:
         fig2 = visualization.plot_exposure_outcome_relationships(
             data=merged_data,
             outcome_var=outcome_var,
@@ -149,13 +158,23 @@ def run_analysis(args):
 
 
 def run_download(args):
-    """Download NHANES data."""
-    data.download_nhanes_data(
+    """Download NHANES data and extract it to the output directory."""
+    # Download the data
+    zip_path = data.download_nhanes_data(
         output_dir=args.output_dir,
         id=args.id,
         filename=args.filename,
         direct_url=args.direct_url
     )
+
+    # Extract the downloaded zip file
+    output_dir, extracted_files = data.extract_nhanes_data(
+        zip_path=zip_path,
+        output_dir=args.output_dir
+    )
+
+    print(f"NHANES data successfully downloaded and extracted to {output_dir}")
+    print(f"Total files extracted: {len(extracted_files)}")
 
 
 def main():

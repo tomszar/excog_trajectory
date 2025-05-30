@@ -8,11 +8,12 @@ NHANES data related to cognitive assessments and environmental exposures.
 import os
 import urllib.request
 import pandas as pd
-from typing import Dict, List, Optional, Union
+import zipfile
+import shutil
+from typing import Dict, List, Optional, Union, Tuple
 
 
 def load_nhanes_data(
-    cycle: Union[str, List[str]],
     data_path: Optional[str] = None,
 ) -> Dict[str, pd.DataFrame]:
     """
@@ -20,8 +21,6 @@ def load_nhanes_data(
 
     Parameters
     ----------
-    cycle : str or list of str
-        NHANES survey cycle(s) to load (e.g., '2011-2012', ['2011-2012', '2013-2014'])
     data_path : str, optional
         Path to the directory containing NHANES data files. If None, will use default path.
 
@@ -31,8 +30,21 @@ def load_nhanes_data(
         Dictionary of DataFrames containing the loaded NHANES data, with keys corresponding
         to the different data components (demographics, questionnaire, laboratory, etc.)
     """
-    # Placeholder for actual implementation
-    return {}
+    # Use the default path if none is provided
+    if data_path is None:
+        data_path = 'data/raw/nh_99-06/MainTable.csv'
+
+    # Check if the file exists
+    if not os.path.exists(data_path):
+        raise FileNotFoundError(f"NHANES data file not found at {data_path}")
+
+    # Load the main NHANES data file
+    print(f"Loading NHANES data from {data_path}...")
+    main_data = pd.read_csv(data_path)
+
+    # Return a dictionary with the loaded data
+    # The key 'main' is used for the main dataset
+    return {'main': main_data}
 
 
 def get_cognitive_data(
@@ -105,6 +117,97 @@ def merge_cognitive_exposure_data(
     return pd.DataFrame()
 
 
+def remove_nan_from_columns(data: pd.DataFrame, columns: Union[str, List[str]] = 'CFDRIGHT') -> pd.DataFrame:
+    """
+    Remove rows with NaN values in the specified column(s).
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing the columns to check for NaN values
+    columns : Union[str, List[str]], optional
+        Column name(s) to check for NaN values, by default 'CFDRIGHT'
+        Can be a single column name (string) or a list of column names
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with rows containing NaN values in specified column(s) removed
+
+    Raises
+    ------
+    KeyError
+        If any of the specified columns are not present in the DataFrame
+    """
+    # Convert single column to list for consistent handling
+    if isinstance(columns, str):
+        columns = [columns]
+
+    # Check if all columns exist in the DataFrame
+    for column in columns:
+        if column not in data.columns:
+            raise KeyError(f"Column '{column}' not found in the DataFrame")
+
+    # Drop rows where any of the specified columns have NaN values
+    cleaned_data = data.dropna(subset=columns)
+
+    # Print information about removed rows
+    num_removed = len(data) - len(cleaned_data)
+    if num_removed > 0:
+        if len(columns) == 1:
+            print(f"Removed {num_removed} rows with NaN values in {columns[0]}")
+        else:
+            print(f"Removed {num_removed} rows with NaN values in columns: {', '.join(columns)}")
+
+    return cleaned_data
+
+
+def remove_nan_from_cfdright(data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Remove rows with NaN values in the CFDRIGHT column.
+
+    This function is maintained for backward compatibility.
+    It is recommended to use remove_nan_from_columns() instead.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing the CFDRIGHT column
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with rows containing NaN values in CFDRIGHT removed
+
+    Raises
+    ------
+    KeyError
+        If the CFDRIGHT column is not present in the DataFrame
+    """
+    return remove_nan_from_columns(data, 'CFDRIGHT')
+
+
+def get_columns_with_nan(data: pd.DataFrame) -> Dict[str, int]:
+    """
+    Get a dictionary of all columns in the DataFrame that contain at least one NaN value,
+    along with the count of NaN values in each column.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame to check for NaN values
+
+    Returns
+    -------
+    Dict[str, int]
+        Dictionary where keys are column names that contain at least one NaN value
+        and values are the counts of NaN values in each column
+    """
+    # Check each column for NaN values and count them
+    columns_with_nan = {col: int(data[col].isna().sum()) for col in data.columns if data[col].isna().any()}
+    return columns_with_nan
+
+
 def download_nhanes_data(
     output_dir: str = "data/raw",
     id: str = "70319",
@@ -164,3 +267,65 @@ def download_nhanes_data(
         raise
 
     return output_path
+
+
+def extract_nhanes_data(
+    zip_path: str,
+    output_dir: str = "data/raw"
+) -> Tuple[str, List[str]]:
+    """
+    Extract NHANES data from a zip file and move the contents to the output directory.
+
+    Parameters
+    ----------
+    zip_path : str
+        Path to the downloaded zip file
+    output_dir : str, optional
+        Directory to save the extracted files, by default "data/raw"
+
+    Returns
+    -------
+    Tuple[str, List[str]]
+        A tuple containing the output directory and a list of extracted file paths
+    """
+    # Create the output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Create a temporary directory for extraction
+    temp_dir = os.path.join(os.path.dirname(zip_path), "temp_extract")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    extracted_files = []
+
+    try:
+        print(f"Extracting {zip_path}...")
+
+        # Extract the zip file to the temporary directory
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(temp_dir)
+
+        # Get a list of all extracted files
+        for root, _, files in os.walk(temp_dir):
+            for file in files:
+                src_path = os.path.join(root, file)
+                # Calculate the relative path to maintain directory structure
+                rel_path = os.path.relpath(src_path, temp_dir)
+                dest_path = os.path.join(output_dir, rel_path)
+
+                # Create destination directory if it doesn't exist
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+
+                # Move the file to the destination
+                shutil.move(src_path, dest_path)
+                extracted_files.append(dest_path)
+                print(f"Moved {rel_path} to {dest_path}")
+
+        print(f"Extraction complete. {len(extracted_files)} files moved to {output_dir}")
+
+    finally:
+        # Clean up the temporary directory
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+            print(f"Cleaned up temporary directory: {temp_dir}")
+
+    return output_dir, extracted_files
