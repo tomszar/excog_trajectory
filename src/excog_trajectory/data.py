@@ -26,9 +26,8 @@ def load_nhanes_data(
 
     Returns
     -------
-    Dict[str, pd.DataFrame]
-        Dictionary of DataFrames containing the loaded NHANES data, with keys corresponding
-        to the different data components (demographics, questionnaire, laboratory, etc.)
+    pd.DataFrame
+        DataFrame containing the loaded NHANES data.
     """
     # Use the default path if none is provided
     if data_path is None:
@@ -44,7 +43,7 @@ def load_nhanes_data(
 
     # Return a dictionary with the loaded data
     # The key 'main' is used for the main dataset
-    return {'main': main_data}
+    return main_data
 
 
 def get_cognitive_data(

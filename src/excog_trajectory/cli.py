@@ -33,16 +33,22 @@ def parse_args():
         help="NHANES survey cycle to analyze (e.g., '2011-2012')",
     )
     analyze_parser.add_argument(
-        "--data-path",
+        "--file-path",
         type=str,
-        default="data/raw",
-        help="Path to directory containing NHANES data files",
+        default="data/raw/nh_99-06/MainTable.csv",
+        help="Path to file containing NHANES data files",
     )
     analyze_parser.add_argument(
         "--output-dir",
         type=str,
         default="results",
         help="Directory to save results and figures",
+    )
+    analyze_parser.add_argument(
+        "--output-data",
+        type=str,
+        default="data/processed",
+        help="Directory to save processed data",
     )
 
     # Parser for the 'download' command
@@ -89,70 +95,35 @@ def run_analysis(args):
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
 
-    print(f"Loading NHANES data for cycle {args.cycle}...")
-    nhanes_data = data.load_nhanes_data(data_path=args.data_path)
-
-    print("Extracting cognitive assessment data...")
-    cognitive_data = data.get_cognitive_data(nhanes_data)
-
-    print("Extracting environmental exposure data...")
-    exposure_data = data.get_exposure_data(nhanes_data)
-
-    print("Merging cognitive and exposure data...")
-    merged_data = data.merge_cognitive_exposure_data(cognitive_data, exposure_data)
+    print(f"Loading NHANES data...")
+    nhanes_data = data.load_nhanes_data(data_path=args.file_path)
 
     # Remove NaN values from cognitive variables
     print("Removing NaN values from cognitive variables...")
-    merged_data = data.remove_nan_from_columns(merged_data, 'CFDRIGHT')
+    nhanes_data = data.remove_nan_from_columns(nhanes_data, 'CFDRIGHT')
 
     # Remove NaN values from demographic variables
     print("Removing NaN values from demographic variables...")
     demographic_vars = ['RIDAGEYR', 'female', 'male', 'black', 'mexican', 'other_hispanic', 'other_eth', 'SES_LEVEL', 'education']
-    merged_data = data.remove_nan_from_columns(merged_data, demographic_vars)
+    nhanes_data = data.remove_nan_from_columns(nhanes_data, demographic_vars)
 
-    # Save the merged data
-    merged_data.to_csv(os.path.join(args.output_dir, "merged_data.csv"), index=False)
-    print(f"Merged data saved to {os.path.join(args.output_dir, 'merged_data.csv')}")
+    # Save the cleaned data
+    nhanes_data.to_csv(os.path.join(args.output_data, "cleaned_nhanes.csv"), index=False)
+    print(f"Cleaned data saved to {os.path.join(args.output_data, 'cleaned_nhanes.csv')}")
 
     # Define variables for analysis
     cognitive_vars = ["CFDRIGHT"]  # Cognitive function right responses
     exposure_vars = ["LBXBPB", "LBXBCD"]  # Blood lead and cadmium levels
     covariates = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic", "other_eth", "SES_LEVEL", "education"]  # Demographics
 
-    print("Running linear models...")
-    model_results = analysis.run_linear_models(
-        data=merged_data,
-        outcome_vars=cognitive_vars,
-        exposure_vars=exposure_vars,
-        covariates=covariates
-    )
-
     print("Creating visualizations...")
     # Plot exposure distributions
-    fig1 = visualization.plot_exposure_distributions(
-        data=merged_data,
-        exposure_vars=exposure_vars
+    fig1 = visualization.plot_distributions(
+        data=nhanes_data,
+        vars=cognitive_vars,
+        save_path=args.output_dir,
     )
-    fig1.savefig(os.path.join(args.output_dir, "exposure_distributions.png"))
-    print(f"Exposure distributions plot saved to {os.path.join(args.output_dir, 'exposure_distributions.png')}")
-
-    # Plot exposure-outcome relationships
-    for outcome_var in cognitive_vars:
-        fig2 = visualization.plot_exposure_outcome_relationships(
-            data=merged_data,
-            outcome_var=outcome_var,
-            exposure_vars=exposure_vars
-        )
-        fig2.savefig(os.path.join(args.output_dir, f"{outcome_var}_relationships.png"))
-        print(f"Exposure-outcome relationships plot saved to {os.path.join(args.output_dir, f'{outcome_var}_relationships.png')}")
-
-    # Plot model coefficients
-    fig3 = visualization.plot_model_coefficients(
-        model_results=model_results,
-        exposure_vars=exposure_vars
-    )
-    fig3.savefig(os.path.join(args.output_dir, "model_coefficients.png"))
-    print(f"Model coefficients plot saved to {os.path.join(args.output_dir, 'model_coefficients.png')}")
+    print(f"Exposure distributions plot saved to {os.path.join(args.output_dir, 'distributions.png')}")
 
     print("Analysis complete!")
 

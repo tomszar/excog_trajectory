@@ -11,23 +11,25 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Union
 
+from matplotlib.figure import Figure
 
-def plot_exposure_distributions(
+
+def plot_distributions(
     data: pd.DataFrame,
-    exposure_vars: List[str],
+    vars: List[str],
     n_cols: int = 3,
     figsize: Tuple[int, int] = (15, 10),
     save_path: Optional[str] = None,
-) -> plt.Figure:
+) -> Figure | None:
     """
-    Create histograms or density plots of exposure variable distributions.
+    Create histograms or density plots of variable distributions.
 
     Parameters
     ----------
     data : pd.DataFrame
-        DataFrame containing exposure variables
-    exposure_vars : list of str
-        List of exposure variables to plot
+        DataFrame containing variables to plot
+    vars : list of str
+        List of variables to plot
     n_cols : int, default=3
         Number of columns in the grid of plots
     figsize : tuple of int, default=(15, 10)
@@ -37,12 +39,17 @@ def plot_exposure_distributions(
 
     Returns
     -------
-    matplotlib.figure.Figure
+    matplotlib.figure.Figure or None
         The created figure object
     """
     # Placeholder for actual implementation
     fig, axes = plt.subplots(1, 1, figsize=figsize)
-    return fig
+    axes.hist(data[vars])
+    if save_path is not None:
+        fig.savefig(save_path + '/distributions.png', bbox_inches='tight')
+        return None
+    else:
+        return fig
 
 
 def plot_exposure_outcome_relationships(
