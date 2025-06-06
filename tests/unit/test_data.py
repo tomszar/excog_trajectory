@@ -76,7 +76,7 @@ def test_get_exposure_data():
 
 
 def test_merge_cognitive_exposure_data():
-    """Test that merge_cognitive_exposure_data correctly merges DataFrames."""
+    """Test that merge_cognitive_exposure_data correctly merges DataFrames using SEQN as the key."""
     # Create mock cognitive and exposure DataFrames
     cognitive_data = pd.DataFrame({
         "SEQN": [1, 2, 3],
@@ -88,9 +88,42 @@ def test_merge_cognitive_exposure_data():
         "LBXBPB": [1.0, 2.0, 3.0]
     })
 
-    result = data.merge_cognitive_exposure_data(cognitive_data, exposure_data)
+    # Patch print to suppress output
+    with patch('builtins.print'):
+        result = data.merge_cognitive_exposure_data(cognitive_data, exposure_data)
+
+    # Check that the result is a DataFrame
     assert isinstance(result, pd.DataFrame)
-    # In a real test, we would check that the merge was done correctly
+
+    # Check that the merge was done correctly using SEQN as the key
+    assert len(result) == 3
+    assert "SEQN" in result.columns
+    assert "CFDDS" in result.columns
+    assert "LBXBPB" in result.columns
+    assert list(result["SEQN"]) == [1, 2, 3]
+    assert list(result["CFDDS"]) == [10, 20, 30]
+    assert list(result["LBXBPB"]) == [1.0, 2.0, 3.0]
+
+    # Test with different SEQN values to ensure inner join works correctly
+    cognitive_data2 = pd.DataFrame({
+        "SEQN": [1, 2, 4],
+        "CFDDS": [10, 20, 40]
+    })
+
+    exposure_data2 = pd.DataFrame({
+        "SEQN": [1, 3, 4],
+        "LBXBPB": [1.0, 3.0, 4.0]
+    })
+
+    # Patch print to suppress output
+    with patch('builtins.print'):
+        result2 = data.merge_cognitive_exposure_data(cognitive_data2, exposure_data2)
+
+    # Check that only the common SEQN values are in the result (inner join)
+    assert len(result2) == 2
+    assert list(result2["SEQN"]) == [1, 4]
+    assert list(result2["CFDDS"]) == [10, 40]
+    assert list(result2["LBXBPB"]) == [1.0, 4.0]
 
 
 def test_remove_nan_from_cfdright():
@@ -336,3 +369,84 @@ def test_download_nhanes_data(mock_makedirs, mock_urlretrieve):
     # Check that the direct URL was used
     mock_urlretrieve.assert_called_once_with(direct_url, os.path.join("data/raw", "nhanes_data.zip"))
     assert result == os.path.join("data/raw", "nhanes_data.zip")
+
+
+def test_apply_qc_rules():
+    """Test that apply_qc_rules correctly applies QC rules to the dataset."""
+    # Create a test DataFrame with variables that should be removed by each rule
+    # and cognitive/covariate variables that should be preserved
+
+    # Create 300 rows to ensure we have enough data for the tests
+    n_rows = 300
+
+    # Create a DataFrame with:
+    # - cognitive_var: a cognitive variable that should be preserved
+    # - covariate_var: a covariate variable that should be preserved
+    # - few_non_nan: a variable with less than 200 non-NaN values (Rule 1)
+    # - categorical_few: a categorical variable with less than 200 values in a category (Rule 2)
+    # - mostly_zeros: a variable with 90% of non-NaN values equal to zero (Rule 3)
+    # - keep_var: a variable that should pass all QC rules
+
+    # Create the test data
+    import numpy as np
+    np.random.seed(42)  # For reproducibility
+
+    # Base DataFrame with IDs
+    test_data = pd.DataFrame({
+        "SEQN": range(1, n_rows + 1),
+    })
+
+    # Cognitive variable (should be preserved)
+    test_data["cognitive_var"] = np.random.normal(100, 15, n_rows)
+
+    # Covariate variable (should be preserved)
+    test_data["covariate_var"] = np.random.normal(50, 10, n_rows)
+
+    # Variable with less than 200 non-NaN values (should be removed by Rule 1)
+    few_non_nan = np.random.normal(0, 1, n_rows)
+    few_non_nan[200:] = np.nan  # Make 100 values NaN
+    test_data["few_non_nan"] = few_non_nan
+
+    # Categorical variable with less than 200 values in a category (should be removed by Rule 2)
+    categorical = np.random.choice([1, 2, 3], n_rows)
+    categorical[:150] = 1  # Make category 1 have only 150 values
+    test_data["categorical_few"] = categorical
+
+    # Variable with 90% of non-NaN values equal to zero (should be removed by Rule 3)
+    mostly_zeros = np.zeros(n_rows)
+    mostly_zeros[:30] = np.random.normal(1, 0.1, 30)  # Make 10% non-zero
+    test_data["mostly_zeros"] = mostly_zeros
+
+    # Variable that should pass all QC rules
+    test_data["keep_var"] = np.random.normal(10, 2, n_rows)
+
+    # Define cognitive and covariate variables
+    cognitive_vars = ["cognitive_var"]
+    covariates = ["covariate_var"]
+
+    # Call the function
+    with patch('builtins.print'):  # Suppress print statements
+        result = data.apply_qc_rules(test_data, cognitive_vars, covariates)
+
+    # Check that the result is a DataFrame
+    assert isinstance(result, pd.DataFrame)
+
+    # Check that cognitive and covariate variables are preserved
+    assert "cognitive_var" in result.columns
+    assert "covariate_var" in result.columns
+
+    # Check that variables that should be removed are not in the result
+    assert "few_non_nan" not in result.columns  # Rule 1
+    assert "categorical_few" not in result.columns  # Rule 2
+    assert "mostly_zeros" not in result.columns  # Rule 3
+
+    # Check that variables that should pass all QC rules are in the result
+    assert "keep_var" in result.columns
+
+    # Check that the original DataFrame was not modified
+    assert "few_non_nan" in test_data.columns
+    assert "categorical_few" in test_data.columns
+    assert "mostly_zeros" in test_data.columns
+
+    # Check that SEQN, covariates, and cognitive_vars are first in the order of columns
+    assert list(result.columns)[:3] == ["SEQN", "covariate_var", "cognitive_var"]

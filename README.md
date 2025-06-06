@@ -9,6 +9,10 @@ The goal of this project is to investigate how various environmental exposures (
 ## Features
 
 - Load and preprocess NHANES data related to cognitive assessments and environmental exposures
+- Apply quality control rules to ensure data reliability:
+  - Remove variables with less than 200 non-NaN values
+  - Remove categorical variables with less than 200 values in a category
+  - Remove variables with 90% of non-NaN values equal to zero
 - Analyze relationships between exposures and cognitive outcomes using various statistical methods
 - Examine longitudinal trajectories of cognitive decline in relation to exposure levels
 - Visualize exposure-outcome relationships and analysis results

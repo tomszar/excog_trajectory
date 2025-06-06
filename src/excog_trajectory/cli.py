@@ -94,27 +94,30 @@ def run_analysis(args):
     """Run the analysis pipeline."""
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(args.output_data, exist_ok=True)
 
     print(f"Loading NHANES data...")
     nhanes_data = data.load_nhanes_data(data_path=args.file_path)
 
+    # Define variables for analysis
+    cognitive_vars = ["CFDRIGHT"]  # Cognitive function right responses
+    covariates = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic", "other_eth", "SES_LEVEL", "education"]  # Demographics
+
     # Remove NaN values from cognitive variables
     print("Removing NaN values from cognitive variables...")
-    nhanes_data = data.remove_nan_from_columns(nhanes_data, 'CFDRIGHT')
+    nhanes_data = data.remove_nan_from_columns(nhanes_data, cognitive_vars)
 
     # Remove NaN values from demographic variables
     print("Removing NaN values from demographic variables...")
-    demographic_vars = ['RIDAGEYR', 'female', 'male', 'black', 'mexican', 'other_hispanic', 'other_eth', 'SES_LEVEL', 'education']
-    nhanes_data = data.remove_nan_from_columns(nhanes_data, demographic_vars)
+    nhanes_data = data.remove_nan_from_columns(nhanes_data, covariates)
+
+    # Apply QC rules to all variables except cognitive and covariate variables
+    print("Applying QC rules to variables...")
+    nhanes_data = data.apply_qc_rules(nhanes_data, cognitive_vars, covariates)
 
     # Save the cleaned data
-    nhanes_data.to_csv(os.path.join(args.output_data, "cleaned_nhanes.csv"), index=False)
+    nhanes_data.to_csv(os.path.join(args.output_data, "cleaned_nhanes.csv"), index=True)
     print(f"Cleaned data saved to {os.path.join(args.output_data, 'cleaned_nhanes.csv')}")
-
-    # Define variables for analysis
-    cognitive_vars = ["CFDRIGHT"]  # Cognitive function right responses
-    exposure_vars = ["LBXBPB", "LBXBCD"]  # Blood lead and cadmium levels
-    covariates = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic", "other_eth", "SES_LEVEL", "education"]  # Demographics
 
     print("Creating visualizations...")
     # Plot exposure distributions
