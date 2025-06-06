@@ -124,6 +124,14 @@ def run_analysis(args):
     nhanes_data["main"].to_csv(os.path.join(args.output_data, "cleaned_nhanes.csv"), index=True)
     print(f"Cleaned data saved to {os.path.join(args.output_data, 'cleaned_nhanes.csv')}")
 
+    # Calculate percentage of missing data for each column
+    print("Calculating percentage of missing data...")
+    missing_data_df = data.get_percentage_missing(nhanes_data["main"])
+
+    # Save the missing data percentages
+    missing_data_df.to_csv(os.path.join(args.output_data, "percentage_missing.csv"), index=False)
+    print(f"Percentage of missing data saved to {os.path.join(args.output_data, 'percentage_missing.csv')}")
+
     print("Creating visualizations...")
     # Plot exposure distributions
     fig1 = visualization.plot_distributions(

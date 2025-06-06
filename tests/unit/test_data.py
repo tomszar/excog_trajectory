@@ -457,6 +457,66 @@ def test_filter_exposure_variables():
     assert set(result3.columns) == {"var1", "var2", "var4"}
 
 
+def test_get_percentage_missing():
+    """Test that get_percentage_missing correctly calculates the percentage of missing data for each column."""
+    # Create a DataFrame with NaN values in specific columns
+    test_data = pd.DataFrame({
+        "SEQN": [1, 2, 3, 4, 5],
+        "COL_WITH_NAN_1": [10, None, 30, 40, 50],  # 20% missing
+        "COL_WITHOUT_NAN": [1, 2, 3, 4, 5],  # 0% missing
+        "COL_WITH_NAN_2": [1, 2, 3, float('nan'), 5]  # 20% missing
+    })
+
+    # Call the function
+    result = data.get_percentage_missing(test_data)
+
+    # Check that the result is a DataFrame
+    assert isinstance(result, pd.DataFrame)
+
+    # Check that the result has the expected columns
+    assert "column_name" in result.columns
+    assert "percentage_missing" in result.columns
+
+    # Check that the result contains all columns
+    assert len(result) == 4
+    assert "SEQN" in result["column_name"].values
+    assert "COL_WITH_NAN_1" in result["column_name"].values
+    assert "COL_WITHOUT_NAN" in result["column_name"].values
+    assert "COL_WITH_NAN_2" in result["column_name"].values
+
+    # Check that the percentages are correct
+    seqn_row = result[result["column_name"] == "SEQN"]
+    assert seqn_row["percentage_missing"].values[0] == 0.0
+
+    col1_row = result[result["column_name"] == "COL_WITH_NAN_1"]
+    assert col1_row["percentage_missing"].values[0] == 20.0
+
+    col2_row = result[result["column_name"] == "COL_WITHOUT_NAN"]
+    assert col2_row["percentage_missing"].values[0] == 0.0
+
+    col3_row = result[result["column_name"] == "COL_WITH_NAN_2"]
+    assert col3_row["percentage_missing"].values[0] == 20.0
+
+    # Test with a DataFrame that has no NaN values
+    test_data_no_nan = pd.DataFrame({
+        "COL1": [1, 2, 3],
+        "COL2": [4, 5, 6]
+    })
+    result_no_nan = data.get_percentage_missing(test_data_no_nan)
+    assert isinstance(result_no_nan, pd.DataFrame)
+    assert len(result_no_nan) == 2
+    assert all(result_no_nan["percentage_missing"] == 0.0)
+
+    # Test with multiple NaN values in a column
+    test_data_multiple_nan = pd.DataFrame({
+        "COL_WITH_MULTIPLE_NAN": [1, None, 3, None, None]  # 60% missing
+    })
+    result_multiple_nan = data.get_percentage_missing(test_data_multiple_nan)
+    assert isinstance(result_multiple_nan, pd.DataFrame)
+    assert len(result_multiple_nan) == 1
+    assert result_multiple_nan["percentage_missing"].values[0] == 60.0
+
+
 def test_apply_qc_rules():
     """Test that apply_qc_rules correctly applies QC rules to the dataset."""
     # Create a test DataFrame with variables that should be removed by each rule

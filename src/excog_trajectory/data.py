@@ -120,6 +120,38 @@ def get_columns_with_nan(data: pd.DataFrame) -> Dict[str, int]:
     return columns_with_nan
 
 
+def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Create a DataFrame that shows the name of each column and the percentage of missing data.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame to check for missing values
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with two columns: 'column_name' and 'percentage_missing'
+    """
+    # Get the total number of rows in the DataFrame
+    total_rows = len(data)
+
+    # Calculate the percentage of missing values for each column
+    missing_percentages = {col: (data[col].isna().sum() / total_rows) * 100 for col in data.columns}
+
+    # Convert the dictionary to a DataFrame
+    missing_df = pd.DataFrame({
+        'column_name': list(missing_percentages.keys()),
+        'percentage_missing': list(missing_percentages.values())
+    })
+
+    # Sort by percentage missing (descending)
+    missing_df = missing_df.sort_values('percentage_missing', ascending=False)
+
+    return missing_df
+
+
 def filter_variables(data: pd.DataFrame, vars_to_filter: List[str], vars_to_keep: Optional[List[str]] = None) -> pd.DataFrame:
     """
     Filter a DataFrame to include only specified variables, while optionally retaining others.
