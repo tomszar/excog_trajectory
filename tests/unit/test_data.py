@@ -371,6 +371,92 @@ def test_download_nhanes_data(mock_makedirs, mock_urlretrieve):
     assert result == os.path.join("data/raw", "nhanes_data.zip")
 
 
+def test_filter_variables():
+    """Test that filter_variables correctly filters variables while retaining specified ones."""
+    # Create a test DataFrame
+    test_data = pd.DataFrame({
+        "var1": [1, 2, 3],
+        "var2": [4, 5, 6],
+        "var3": [7, 8, 9],
+        "var4": [10, 11, 12]
+    })
+
+    # Test case 1: Filter with no vars_to_keep
+    result1 = data.filter_variables(test_data, ["var1", "var3"])
+    assert list(result1.columns) == ["var1", "var3"]
+
+    # Test case 2: Filter with vars_to_keep
+    result2 = data.filter_variables(test_data, ["var1"], ["var4"])
+    # Check that vars_to_keep (var4) appears before vars_to_filter (var1)
+    assert list(result2.columns) == ["var4", "var1"]
+
+    # Test case 3: Filter with non-existent variables
+    result3 = data.filter_variables(test_data, ["var1", "non_existent"], ["var4", "also_non_existent"])
+    # Check that vars_to_keep (var4) appears before vars_to_filter (var1)
+    assert list(result3.columns) == ["var4", "var1"]
+
+    # Test case 4: Filter with empty vars_to_filter but non-empty vars_to_keep
+    result4 = data.filter_variables(test_data, [], ["var2", "var4"])
+    # Check that vars_to_keep appear in the order they were specified
+    assert list(result4.columns) == ["var2", "var4"]
+
+    # Test case 5: Filter with empty vars_to_filter and empty vars_to_keep
+    result5 = data.filter_variables(test_data, [], [])
+    assert result5.empty
+
+    # Test case 6: Filter with non-existent variables only
+    result6 = data.filter_variables(test_data, ["non_existent"], ["also_non_existent"])
+    assert result6.empty
+
+    # Test case 7: Filter with multiple vars_to_keep and vars_to_filter
+    result7 = data.filter_variables(test_data, ["var1", "var3"], ["var4", "var2"])
+    # Check that vars_to_keep appear first in the order they were specified,
+    # followed by vars_to_filter in the order they were specified
+    assert list(result7.columns) == ["var4", "var2", "var1", "var3"]
+
+
+def test_filter_exposure_variables():
+    """Test that filter_exposure_variables correctly filters exposure variables while retaining specified ones."""
+    # Create a mock NHANES data dictionary
+    main_data = pd.DataFrame({
+        "var1": [1, 2, 3],  # Exposure variable
+        "var2": [4, 5, 6],  # Exposure variable
+        "var3": [7, 8, 9],  # Non-exposure variable
+        "var4": [10, 11, 12]  # Non-exposure variable to keep
+    })
+
+    description_data = pd.DataFrame({
+        "var": ["var1", "var2", "var3", "var4"],
+        "category": ["alcohol use", "pesticides", "demographics", "demographics"]
+    })
+
+    nhanes_data = {
+        "main": main_data,
+        "description": description_data
+    }
+
+    # Test case 1: Filter with no vars_to_keep
+    with patch('builtins.print'):  # Suppress print statements
+        result1 = data.filter_exposure_variables(nhanes_data)
+
+    # Should only include exposure variables (var1, var2)
+    assert set(result1.columns) == {"var1", "var2"}
+
+    # Test case 2: Filter with vars_to_keep
+    with patch('builtins.print'):  # Suppress print statements
+        result2 = data.filter_exposure_variables(nhanes_data, ["var4"])
+
+    # Should include exposure variables (var1, var2) and var4
+    assert set(result2.columns) == {"var1", "var2", "var4"}
+
+    # Test case 3: Filter with non-existent vars_to_keep
+    with patch('builtins.print'):  # Suppress print statements
+        result3 = data.filter_exposure_variables(nhanes_data, ["var4", "non_existent"])
+
+    # Should include exposure variables (var1, var2) and var4
+    assert set(result3.columns) == {"var1", "var2", "var4"}
+
+
 def test_apply_qc_rules():
     """Test that apply_qc_rules correctly applies QC rules to the dataset."""
     # Create a test DataFrame with variables that should be removed by each rule

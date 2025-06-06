@@ -33,9 +33,9 @@ def parse_args():
         help="NHANES survey cycle to analyze (e.g., '2011-2012')",
     )
     analyze_parser.add_argument(
-        "--file-path",
+        "--data-path",
         type=str,
-        default="data/raw/nh_99-06/MainTable.csv",
+        default="data/raw/nh_99-06/",
         help="Path to file containing NHANES data files",
     )
     analyze_parser.add_argument(
@@ -97,32 +97,37 @@ def run_analysis(args):
     os.makedirs(args.output_data, exist_ok=True)
 
     print(f"Loading NHANES data...")
-    nhanes_data = data.load_nhanes_data(data_path=args.file_path)
+    nhanes_data = data.load_nhanes_data(data_path=args.data_path)
 
     # Define variables for analysis
     cognitive_vars = ["CFDRIGHT"]  # Cognitive function right responses
     covariates = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic", "other_eth", "SES_LEVEL", "education"]  # Demographics
 
+    # Keep only relevant columns in the main DataFrame
+    print("Filtering NHANES data to keep only relevant columns...")
+    # Filter exposure variables
+    nhanes_data["main"] = data.filter_exposure_variables(nhanes_data, cognitive_vars + covariates)
+
     # Remove NaN values from cognitive variables
     print("Removing NaN values from cognitive variables...")
-    nhanes_data = data.remove_nan_from_columns(nhanes_data, cognitive_vars)
+    nhanes_data["main"] = data.remove_nan_from_columns(nhanes_data["main"], cognitive_vars)
 
     # Remove NaN values from demographic variables
     print("Removing NaN values from demographic variables...")
-    nhanes_data = data.remove_nan_from_columns(nhanes_data, covariates)
+    nhanes_data["main"] = data.remove_nan_from_columns(nhanes_data["main"], covariates)
 
     # Apply QC rules to all variables except cognitive and covariate variables
     print("Applying QC rules to variables...")
-    nhanes_data = data.apply_qc_rules(nhanes_data, cognitive_vars, covariates)
+    nhanes_data["main"] = data.apply_qc_rules(nhanes_data["main"], cognitive_vars, covariates)
 
     # Save the cleaned data
-    nhanes_data.to_csv(os.path.join(args.output_data, "cleaned_nhanes.csv"), index=True)
+    nhanes_data["main"].to_csv(os.path.join(args.output_data, "cleaned_nhanes.csv"), index=True)
     print(f"Cleaned data saved to {os.path.join(args.output_data, 'cleaned_nhanes.csv')}")
 
     print("Creating visualizations...")
     # Plot exposure distributions
     fig1 = visualization.plot_distributions(
-        data=nhanes_data,
+        data=nhanes_data["main"],
         vars=cognitive_vars,
         save_path=args.output_dir,
     )

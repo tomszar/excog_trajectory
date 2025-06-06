@@ -16,34 +16,42 @@ from typing import Dict, List, Optional, Union, Tuple, Set
 
 def load_nhanes_data(
     data_path: Optional[str] = None,
-) -> pd.DataFrame:
+    file_names: Optional[List[str]] = None,
+) -> Dict[str, pd.DataFrame]:
     """
     Load NHANES data for specified survey cycle(s).
 
     Parameters
     ----------
     data_path : str, optional
-        Path to the directory containing NHANES data files. If None, will use default path.
+        Path to the directory containing NHANES data files. If None, will use the default path.
+    file_names : List[str], optional
+        List of specific file names to load. If None, will use the default NHANES data names.
 
     Returns
     -------
-    pd.DataFrame
-        DataFrame containing the loaded NHANES data.
+    dict[pd.DataFrame]
+        Dictionary of DataFrame containing the loaded NHANES data and var descriptions.
     """
     # Use the default path if none is provided
     if data_path is None:
-        data_path = 'data/raw/nh_99-06/MainTable.csv'
+        data_path = "data/raw/nh_99-06/"
 
-    # Check if the file exists
-    if not os.path.exists(data_path):
-        raise FileNotFoundError(f"NHANES data file not found at {data_path}")
+    if file_names is None:
+        file_names = ["MainTable.csv", "VarDescription.csv"]
 
-    # Load the main NHANES data file
+    # Check if the files exist
+    for file in file_names:
+        if not os.path.exists(os.path.join(data_path, file)):
+            raise FileNotFoundError(f"NHANES data file '{file}' not found at {data_path}")
+
+    # Load the main NHANES data file as dict
     print(f"Loading NHANES data from {data_path}...")
-    main_data = pd.read_csv(data_path, index_col="SEQN")
+    main_data = pd.read_csv(os.path.join(data_path, file_names[0]), index_col="SEQN")
+    var_description = pd.read_csv(os.path.join(data_path, file_names[1]))
 
     # Return a dataframe with the loaded data
-    return main_data
+    return {"main": main_data, "description": var_description}
 
 
 def remove_nan_from_columns(data: pd.DataFrame, columns: Union[str, List[str]] = 'CFDRIGHT') -> pd.DataFrame:
@@ -110,6 +118,135 @@ def get_columns_with_nan(data: pd.DataFrame) -> Dict[str, int]:
     # Check each column for NaN values and count them
     columns_with_nan = {col: int(data[col].isna().sum()) for col in data.columns if data[col].isna().any()}
     return columns_with_nan
+
+
+def filter_variables(data: pd.DataFrame, vars_to_filter: List[str], vars_to_keep: Optional[List[str]] = None) -> pd.DataFrame:
+    """
+    Filter a DataFrame to include only specified variables, while optionally retaining others.
+    Variables in vars_to_keep will appear at the beginning of the returned DataFrame.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        The DataFrame to filter
+    vars_to_filter : List[str]
+        List of variables to filter (include in the result)
+    vars_to_keep : Optional[List[str]], optional
+        List of variables to always keep, regardless of filtering criteria, by default None
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing only the filtered variables and any variables specified to keep,
+        with vars_to_keep appearing first
+    """
+    # Initialize lists for variables to include
+    keep_vars = []
+    filter_vars = []
+
+    # Add variables to keep that exist in the data
+    if vars_to_keep:
+        keep_vars = [var for var in vars_to_keep if var in data.columns]
+
+    # Add variables to filter that exist in the data and are not already in keep_vars
+    filter_vars = [var for var in vars_to_filter if var in data.columns and var not in keep_vars]
+
+    # Combine the lists in the desired order: keep_vars first, then filter_vars
+    vars_list = keep_vars + filter_vars
+
+    if not vars_list:
+        return pd.DataFrame()
+
+    return data[vars_list].copy()
+
+
+def filter_exposure_variables(nhanes_data: Dict[str, pd.DataFrame], vars_to_keep: Optional[List[str]] = None) -> pd.DataFrame:
+    """
+    Filter variables from nhanes_data["main"] that belong to specific exposure categories.
+
+    Uses the nhanes_data["description"] dataframe to retrieve the association between
+    a variable and its category (columns var and category respectively).
+
+    Parameters
+    ----------
+    nhanes_data : Dict[str, pd.DataFrame]
+        Dictionary containing NHANES data with keys "main" and "description"
+    vars_to_keep : Optional[List[str]], optional
+        List of variables to always keep, regardless of exposure categories, by default None
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing only variables from the specified exposure categories
+        and any variables specified to keep
+
+    Raises
+    ------
+    KeyError
+        If "main" or "description" keys are not present in nhanes_data
+        If "var" or "category" columns are not present in nhanes_data["description"]
+    """
+    # Check if required keys are present in nhanes_data
+    if "main" not in nhanes_data or "description" not in nhanes_data:
+        raise KeyError("nhanes_data must contain 'main' and 'description' keys")
+
+    # Check if required columns are present in nhanes_data["description"]
+    if "var" not in nhanes_data["description"].columns or "category" not in nhanes_data["description"].columns:
+        raise KeyError("nhanes_data['description'] must contain 'var' and 'category' columns")
+
+    # List of exposure categories to retain
+    exposure_categories = ["alcohol use",
+                           "bacterial infection",
+                           "cotinine",
+                           "diakyl",
+                           "dioxins",
+                           "food component recall",
+                           "furans",
+                           "heavy metals",
+                           "housing",
+                           "hydrocarbons",
+                           "nutrients",
+                           "occupation",
+                           "pcbs",
+                           "perchlorate",
+                           "pesticides",
+                           "phenols",
+                           "phthalates",
+                           "phytoestrogens",
+                           "polybrominated ethers",
+                           "polyflourochemicals",
+                           "sexual behavior",
+                           "smoking behavior",
+                           "smoking family",
+                           "social support",
+                           "street drug",
+                           "sun exposure",
+                           "supplement use",
+                           "viral infection",
+                           "volatile compounds"]
+
+    # Filter variables that belong to the specified exposure categories
+    exposure_vars = list(set(nhanes_data["description"][
+        nhanes_data["description"]["category"].isin(exposure_categories)
+    ]["var"]))
+
+    # Use the filter_variables function to filter the data
+    filtered_data = filter_variables(nhanes_data["main"], exposure_vars, vars_to_keep)
+
+    if filtered_data.empty:
+        print("Warning: No exposure variables found in the main data")
+        return pd.DataFrame()
+
+    # Count the number of exposure variables (excluding vars_to_keep)
+    exposure_vars_count = len([var for var in filtered_data.columns 
+                              if vars_to_keep is None or var not in vars_to_keep])
+
+    print(f"Filtered {exposure_vars_count} exposure variables from {len(exposure_categories)} categories")
+    if vars_to_keep:
+        kept_vars_count = len([var for var in filtered_data.columns if var in vars_to_keep])
+        print(f"Kept {kept_vars_count} additional variables as specified")
+
+    return filtered_data
 
 
 def download_nhanes_data(
@@ -210,14 +347,14 @@ def apply_qc_rules(
     seqn_var = ["SEQN"] if "SEQN" in data.columns else []
 
     # Identify variables to exclude from QC rules
-    excluded_vars = set(seqn_var + cognitive_vars + covariates)
+    excluded_vars = seqn_var + cognitive_vars + covariates
 
     # Get all variables that are not excluded
     all_vars = set(data.columns)
-    vars_to_check = all_vars - excluded_vars
+    vars_to_check = list(all_vars - set(excluded_vars))
 
-    # Variables to keep after QC
-    vars_to_keep = set(excluded_vars)
+    # Variables that pass QC rules
+    vars_passing_qc = []
 
     # Track removed variables for reporting
     removed_vars_rule1 = []
@@ -228,56 +365,62 @@ def apply_qc_rules(
     for var in vars_to_check:
         non_nan_count = data[var].notna().sum()
         if non_nan_count >= 200:
-            vars_to_keep.add(var)
+            vars_passing_qc.append(var)
         else:
             removed_vars_rule1.append(var)
 
     # Update vars_to_check to only include variables that passed Rule 1
-    vars_to_check = vars_to_keep - excluded_vars
+    vars_to_check = vars_passing_qc.copy()
+    vars_passing_qc = []
 
     # Apply Rule 2: Remove categorical variables with less than 200 values in a category
-    for var in list(vars_to_check):
+    for var in vars_to_check:
         # Check if variable is categorical (has fewer than 10 unique values)
         unique_values = data[var].dropna().unique()
         if len(unique_values) < 10:  # Heuristic for identifying categorical variables
             # Check if any category has less than 200 values
             value_counts = data[var].value_counts()
             if (value_counts < 200).any():
-                vars_to_keep.remove(var)
                 removed_vars_rule2.append(var)
+            else:
+                vars_passing_qc.append(var)
+        else:
+            vars_passing_qc.append(var)
 
     # Update vars_to_check to only include variables that passed Rule 2
-    vars_to_check = vars_to_keep - excluded_vars
+    vars_to_check = vars_passing_qc.copy()
+    vars_passing_qc = []
 
     # Apply Rule 3: Remove variables with 90% of non-NaN values equal to zero
-    for var in list(vars_to_check):
+    for var in vars_to_check:
         non_nan_values = data[var].dropna()
         if len(non_nan_values) > 0:
             zero_percentage = (non_nan_values == 0).mean()
             if zero_percentage >= 0.9:
-                vars_to_keep.remove(var)
                 removed_vars_rule3.append(var)
+            else:
+                vars_passing_qc.append(var)
+        else:
+            vars_passing_qc.append(var)
 
     # Print summary of removed variables
     print(f"QC Rule 1: Removed {len(removed_vars_rule1)} variables with less than 200 non-NaN values")
     print(f"QC Rule 2: Removed {len(removed_vars_rule2)} categorical variables with less than 200 values in a category")
     print(f"QC Rule 3: Removed {len(removed_vars_rule3)} variables with 90% of non-NaN values equal to zero")
     print(f"Total variables removed: {len(removed_vars_rule1) + len(removed_vars_rule2) + len(removed_vars_rule3)}")
-    print(f"Variables remaining: {len(vars_to_keep)} out of {len(all_vars)}")
+    print(f"Variables remaining: {len(vars_passing_qc) + len(excluded_vars)} out of {len(all_vars)}")
 
-    # Order columns with covariates, and cognitive_vars first
-    ordered_columns = []
+    # Use the filter_variables function to get the final dataset
+    # First, order the variables: covariates and cognitive_vars first, then the rest
+    ordered_vars = []
+    ordered_vars.extend(seqn_var)
+    ordered_vars.extend(covariates)
+    ordered_vars.extend(cognitive_vars)
 
-    # Add covariates and cognitive variables
-    ordered_columns.extend([var for var in covariates if var in vars_to_keep])
-    ordered_columns.extend([var for var in cognitive_vars if var in vars_to_keep])
+    # Use filter_variables to get the final dataset with both the passing QC variables and the excluded variables
+    result = filter_variables(data_qc, vars_passing_qc, ordered_vars)
 
-    # Add remaining variables
-    remaining_vars = [var for var in vars_to_keep if var not in ordered_columns]
-    ordered_columns.extend(remaining_vars)
-
-    # Return data with only the variables that passed QC, in the specified order
-    return data_qc[ordered_columns]
+    return result
 
 
 def extract_nhanes_data(
