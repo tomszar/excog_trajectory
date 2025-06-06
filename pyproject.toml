@@ -7,7 +7,7 @@ name = "excog-trajectory"
 version = "0.1.0"
 description = "Analysis of exposomic trajectories of cognitive decline in NHANES"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "Your Name", email = "your.email@example.com"},
