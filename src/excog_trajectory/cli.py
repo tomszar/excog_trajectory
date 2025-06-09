@@ -141,6 +141,15 @@ def run_analysis(args):
     )
     print(f"Exposure distributions plot saved to {os.path.join(args.output_dir, 'distributions.png')}")
 
+    # Create correlation matrix of exposure variables
+    print("Creating correlation matrix of exposure variables...")
+    visualization.plot_exposure_correlation_matrix(
+        data=nhanes_data["main"],
+        description_df=nhanes_data["description"],
+        save_path=args.output_dir,
+    )
+    print(f"Exposure correlation matrix saved to {os.path.join(args.output_dir, 'exposure_correlation_matrix.png')}")
+
     print("Analysis complete!")
 
 
