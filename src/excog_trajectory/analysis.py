@@ -15,6 +15,105 @@ from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform
 
 
+def assess_missing_data(
+    data_subset: pd.DataFrame,
+    exposure_vars: List[str],
+    min_observations: int = 30,
+    min_pct_observations: float = 0.1,
+) -> Dict[str, object]:
+    """
+    Assess missing data patterns and calculate reliability metrics for variables.
+
+    Parameters
+    ----------
+    data_subset : pd.DataFrame
+        DataFrame containing the variables to analyze
+    exposure_vars : List[str]
+        List of exposure variables to include in the assessment
+    min_observations : int, default=30
+        Minimum number of complete observations required for a reliable correlation
+    min_pct_observations : float, default=0.1
+        Minimum percentage of total observations required for a reliable correlation
+
+    Returns
+    -------
+    Dict[str, object]
+        Dictionary containing:
+        - 'missing_info': DataFrame with missing data counts and percentages
+        - 'pairwise_complete_count': DataFrame with pairwise complete observation counts
+        - 'pairwise_complete_pct': DataFrame with pairwise complete observation percentages
+        - 'pairwise_reliability': DataFrame indicating if pairs have enough observations
+        - 'reliability_info': DataFrame with reliability metrics for each variable
+    """
+    # Calculate the total number of observations
+    total_obs = len(data_subset)
+
+    # Calculate the minimum number of observations based on percentage
+    min_obs_from_pct = int(total_obs * min_pct_observations)
+
+    # Use the maximum of the two thresholds
+    effective_min_obs = max(min_observations, min_obs_from_pct)
+
+    # Calculate missing data statistics
+    missing_counts = data_subset.isna().sum()
+    missing_percentages = (missing_counts / total_obs) * 100
+
+    # Create a DataFrame with missing data information
+    missing_info = pd.DataFrame({
+        'variable': missing_counts.index,
+        'missing_count': missing_counts.values,
+        'missing_percentage': missing_percentages.values
+    })
+
+    # Calculate pairwise completeness
+    pairwise_complete_count = pd.DataFrame(index=exposure_vars,
+                                           columns=exposure_vars)
+    pairwise_complete_pct = pd.DataFrame(index=exposure_vars, columns=exposure_vars)
+    pairwise_reliability = pd.DataFrame(index=exposure_vars, columns=exposure_vars)
+
+    # Calculate pairwise completeness
+    for i, var1 in enumerate(exposure_vars):
+        for j, var2 in enumerate(exposure_vars):
+            # For diagonal elements, use the non-missing count for the variable
+            if i == j:
+                complete_count = data_subset[var1].notna().sum()
+            else:
+                # For off-diagonal elements, count observations where both variables are non-missing
+                complete_count = data_subset[[var1, var2]].dropna().shape[0]
+
+            # Store the count and percentage
+            pairwise_complete_count.loc[var1, var2] = complete_count
+            pairwise_complete_pct.loc[var1, var2] = (complete_count / total_obs) * 100
+
+            # Determine if the pair has enough observations for reliable correlation
+            is_reliable = complete_count >= effective_min_obs
+            pairwise_reliability.loc[var1, var2] = is_reliable
+
+    # Calculate the number of reliable correlations per variable
+    reliable_counts = pd.Series(data = np.count_nonzero(pairwise_reliability, axis=1) - 1,
+                                index = exposure_vars)  # Subtract 1 to exclude self-correlation
+    reliable_percentages = (reliable_counts / (len(exposure_vars) - 1)) * 100
+
+    # Create a DataFrame with reliability information
+    reliability_info = pd.DataFrame({
+        'variable': reliable_counts.index,
+        'reliable_correlations': reliable_counts.values,
+        'reliable_percentage': reliable_percentages.values
+    })
+
+    # Store missing data assessment results
+    missing_assessment = {
+        'missing_info': missing_info,
+        'pairwise_complete_count': pairwise_complete_count,
+        'pairwise_complete_pct': pairwise_complete_pct,
+        'pairwise_reliability': pairwise_reliability,
+        'reliability_info': reliability_info,
+        'effective_min_obs': effective_min_obs
+    }
+
+    return missing_assessment
+
+
 def run_linear_models(
     data: pd.DataFrame,
     outcome_vars: List[str],
@@ -231,73 +330,26 @@ def run_wgcna(
     # Select only the exposure variables
     data_subset = data[exposure_vars].copy()
 
-    # Calculate the total number of observations
-    total_obs = len(data_subset)
-
-    # Calculate the minimum number of observations based on percentage
-    min_obs_from_pct = int(total_obs * min_pct_observations)
-
-    # Use the maximum of the two thresholds
-    effective_min_obs = max(min_observations, min_obs_from_pct)
-
     # Initialize missing data assessment results
     missing_assessment = {}
 
+    # Calculate the minimum number of observations based on percentage
+    total_obs = len(data_subset)
+    min_obs_from_pct = int(total_obs * min_pct_observations)
+    effective_min_obs = max(min_observations, min_obs_from_pct)
+
     if assess_missing:
-        # Calculate missing data statistics
-        missing_counts = data_subset.isna().sum()
-        missing_percentages = (missing_counts / total_obs) * 100
+        # Call the missing data assessment function
+        missing_assessment = assess_missing_data(
+            data_subset=data_subset,
+            exposure_vars=exposure_vars,
+            min_observations=min_observations,
+            min_pct_observations=min_pct_observations
+        )
 
-        # Create a DataFrame with missing data information
-        missing_info = pd.DataFrame({
-            'variable': missing_counts.index,
-            'missing_count': missing_counts.values,
-            'missing_percentage': missing_percentages.values
-        })
-
-        # Calculate pairwise completeness
-        pairwise_complete_count = pd.DataFrame(index=exposure_vars, columns=exposure_vars)
-        pairwise_complete_pct = pd.DataFrame(index=exposure_vars, columns=exposure_vars)
-        pairwise_reliability = pd.DataFrame(index=exposure_vars, columns=exposure_vars)
-
-        # Calculate pairwise completeness
-        for i, var1 in enumerate(exposure_vars):
-            for j, var2 in enumerate(exposure_vars):
-                # For diagonal elements, use the non-missing count for the variable
-                if i == j:
-                    complete_count = data_subset[var1].notna().sum()
-                else:
-                    # For off-diagonal elements, count observations where both variables are non-missing
-                    complete_count = data_subset[[var1, var2]].dropna().shape[0]
-
-                # Store the count and percentage
-                pairwise_complete_count.loc[var1, var2] = complete_count
-                pairwise_complete_pct.loc[var1, var2] = (complete_count / total_obs) * 100
-
-                # Determine if the pair has enough observations for reliable correlation
-                is_reliable = complete_count >= effective_min_obs
-                pairwise_reliability.loc[var1, var2] = is_reliable
-
-        # Calculate the number of reliable correlations per variable
-        reliable_counts = pd.Series(data = np.count_nonzero(pairwise_reliability, axis=1) - 1,
-                                    index = exposure_vars)  # Subtract 1 to exclude self-correlation
-        reliable_percentages = (reliable_counts / (len(exposure_vars) - 1)) * 100
-
-        # Create a DataFrame with reliability information
-        reliability_info = pd.DataFrame({
-            'variable': reliable_counts.index,
-            'reliable_correlations': reliable_counts.values,
-            'reliable_percentage': reliable_percentages.values
-        })
-
-        # Store missing data assessment results
-        missing_assessment = {
-            'missing_info': missing_info,
-            'pairwise_complete_count': pairwise_complete_count,
-            'pairwise_complete_pct': pairwise_complete_pct,
-            'pairwise_reliability': pairwise_reliability,
-            'reliability_info': reliability_info
-        }
+        # Extract reliability_info for later use
+        reliability_info = missing_assessment['reliability_info']
+        effective_min_obs = missing_assessment['effective_min_obs']
 
     # Filter variables based on reliability
     min_reliable_correlations = (len(exposure_vars) - 1) * min_reliable_correlations_pct
