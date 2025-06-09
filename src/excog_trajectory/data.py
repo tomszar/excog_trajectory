@@ -354,6 +354,7 @@ def apply_qc_rules(
     1. Remove variables with less than 200 non-NaN values
     2. Remove categorical variables with less than 200 values in a category
     3. Remove variables with 90% of non-NaN values equal to zero
+    4. Remove variables that were not measured in at least 3 of the 4 survey cycles
 
     These rules are applied to all variables except cognitive and covariate variables.
     The returned DataFrame will have SEQN, covariates, and cognitive_vars first in the order of columns.
@@ -392,6 +393,7 @@ def apply_qc_rules(
     removed_vars_rule1 = []
     removed_vars_rule2 = []
     removed_vars_rule3 = []
+    removed_vars_rule4 = []
 
     # Apply Rule 1: Remove variables with less than 200 non-NaN values
     for var in vars_to_check:
@@ -435,11 +437,40 @@ def apply_qc_rules(
         else:
             vars_passing_qc.append(var)
 
+    # Update vars_to_check to only include variables that passed Rule 3
+    vars_to_check = vars_passing_qc.copy()
+    vars_passing_qc = []
+
+    # Apply Rule 4: Remove variables that were not measured in at least 3 of the 4 survey cycles
+    if "SDDSRVYR" in data.columns:
+        # Get all survey cycles present in the data
+        survey_cycles = data["SDDSRVYR"].unique()
+
+        for var in vars_to_check:
+            # Count in how many survey cycles this variable has data
+            cycles_with_data = 0
+            for cycle in survey_cycles:
+                # Check if variable has data in this cycle
+                cycle_data = data[data["SDDSRVYR"] == cycle][var]
+                if not cycle_data.empty and cycle_data.notna().any():
+                    cycles_with_data += 1
+
+            # Keep variable if it has data in at least 2 cycles
+            if cycles_with_data >= 2:
+                vars_passing_qc.append(var)
+            else:
+                removed_vars_rule4.append(var)
+    else:
+        # If SDDSRVYR is not in the data, skip this rule
+        vars_passing_qc = vars_to_check.copy()
+        print("Warning: SDDSRVYR not found in data. Skipping Rule 4.")
+
     # Print summary of removed variables
     print(f"QC Rule 1: Removed {len(removed_vars_rule1)} variables with less than 200 non-NaN values")
     print(f"QC Rule 2: Removed {len(removed_vars_rule2)} categorical variables with less than 200 values in a category")
     print(f"QC Rule 3: Removed {len(removed_vars_rule3)} variables with 90% of non-NaN values equal to zero")
-    print(f"Total variables removed: {len(removed_vars_rule1) + len(removed_vars_rule2) + len(removed_vars_rule3)}")
+    print(f"QC Rule 4: Removed {len(removed_vars_rule4)} variables not measured in at least 2 of 4 survey cycles")
+    print(f"Total variables removed: {len(removed_vars_rule1) + len(removed_vars_rule2) + len(removed_vars_rule3) + len(removed_vars_rule4)}")
     print(f"Variables remaining: {len(vars_passing_qc) + len(excluded_vars)} out of {len(all_vars)}")
 
     # Use the filter_variables function to get the final dataset

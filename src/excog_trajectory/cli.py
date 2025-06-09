@@ -101,7 +101,7 @@ def run_analysis(args):
 
     # Define variables for analysis
     cognitive_vars = ["CFDRIGHT"]  # Cognitive function right responses
-    covariates = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic", "other_eth", "SES_LEVEL", "education"]  # Demographics
+    covariates = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic", "other_eth", "SES_LEVEL", "education", "SDDSRVYR"]  # Demographics and survey cycle
 
     # Keep only relevant columns in the main DataFrame
     print("Filtering NHANES data to keep only relevant columns...")
@@ -149,6 +149,30 @@ def run_analysis(args):
         save_path=args.output_dir,
     )
     print(f"Exposure correlation matrix saved to {os.path.join(args.output_dir, 'exposure_correlation_matrix.png')}")
+
+    # Run WGCNA analysis on exposure variables
+    print("Running WGCNA analysis on exposure variables...")
+    wgcna_results = analysis.run_wgcna(
+        data=nhanes_data["main"],
+        covariates=covariates,
+        cognitive_vars=cognitive_vars,
+        power=10,
+        min_module_size=2,
+        cut_height=0.99
+    )
+
+    # Visualize WGCNA clusters
+    print("Generating WGCNA cluster visualization...")
+    visualization.plot_wgcna_clusters(
+        wgcna_results=wgcna_results,
+        description_df=nhanes_data["description"],
+        save_path=args.output_dir
+    )
+    print(f"WGCNA clusters saved to {os.path.join(args.output_dir, 'wgcna_clusters.png')} and {os.path.join(args.output_dir, 'wgcna_clusters.txt')}")
+
+    # Save WGCNA cluster assignments
+    wgcna_results['labels'].to_csv(os.path.join(args.output_data, "wgcna_cluster_assignments.csv"), index=False)
+    print(f"WGCNA cluster assignments saved to {os.path.join(args.output_data, 'wgcna_cluster_assignments.csv')}")
 
     print("Analysis complete!")
 
