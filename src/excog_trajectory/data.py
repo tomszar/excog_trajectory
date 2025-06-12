@@ -12,6 +12,12 @@ import zipfile
 import shutil
 import numpy as np
 from typing import Dict, List, Optional, Union, Tuple, Set
+from sklearn.experimental import enable_iterative_imputer
+from sklearn.impute import IterativeImputer, SimpleImputer
+from sklearn.model_selection import KFold
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.preprocessing import OneHotEncoder
 
 
 def load_nhanes_data(
@@ -586,3 +592,340 @@ def extract_nhanes_data(
             print(f"Cleaned up temporary directory: {temp_dir}")
 
     return output_dir, extracted_files
+
+
+def identify_variable_types(data: pd.DataFrame) -> Dict[str, str]:
+    """
+    Identify the type of each variable in the DataFrame (continuous or categorical).
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing the variables to identify
+
+    Returns
+    -------
+    Dict[str, str]
+        Dictionary mapping variable names to their types ('continuous' or 'categorical')
+    """
+    var_types = {}
+
+    for col in data.columns:
+        # Skip columns with all NaN values
+        if data[col].isna().all():
+            continue
+
+        # Get non-NaN values
+        non_nan_values = data[col].dropna()
+
+        # Check if the variable is numeric
+        if pd.api.types.is_numeric_dtype(non_nan_values):
+            # Check if the variable is categorical (has fewer than 10 unique values)
+            unique_values = non_nan_values.unique()
+            if len(unique_values) < 10:
+                var_types[col] = 'categorical'
+            else:
+                var_types[col] = 'continuous'
+        else:
+            # Non-numeric variables are considered categorical
+            var_types[col] = 'categorical'
+
+    return var_types
+
+
+def impute_exposure_variables(
+    data_path: str = "data/processed/cleaned_nhanes.csv",
+    description_path: Optional[str] = None,
+    output_path: Optional[str] = None,
+    n_imputations: int = 5,
+    n_cv_folds: int = 5,
+    random_state: int = 42,
+    skip_cv: bool = False,
+    max_iter: int = 10,
+    n_estimators: int = 50
+) -> Tuple[pd.DataFrame, Dict[str, Dict[str, float]]]:
+    """
+    Impute missing values in exposure variables using Multiple Imputation by Chained Equations (MICE).
+
+    This function:
+    1. Loads the cleaned NHANES dataset
+    2. Identifies exposure variables
+    3. Determines variable types (continuous vs categorical)
+    4. Implements MICE imputation with cross-validation
+    5. Returns the imputed dataset and imputation performance metrics
+
+    Parameters
+    ----------
+    data_path : str, optional
+        Path to the cleaned NHANES dataset, by default "data/processed/cleaned_nhanes.csv"
+    description_path : Optional[str], optional
+        Path to the variable description file, by default None
+    output_path : Optional[str], optional
+        Path to save the imputed dataset, by default None
+    n_imputations : int, optional
+        Number of imputations to perform, by default 5
+    n_cv_folds : int, optional
+        Number of cross-validation folds, by default 5
+    random_state : int, optional
+        Random state for reproducibility, by default 42
+
+    Returns
+    -------
+    Tuple[pd.DataFrame, Dict[str, Dict[str, float]]]
+        A tuple containing:
+        - The imputed DataFrame
+        - A dictionary of imputation performance metrics for each variable
+    """
+    # Load the cleaned NHANES dataset
+    print(f"Loading cleaned NHANES data from {data_path}...")
+    data = pd.read_csv(data_path, index_col=0)
+
+    # Load the variable description file if provided
+    description_df = None
+    if description_path:
+        print(f"Loading variable description from {description_path}...")
+        description_df = pd.read_csv(description_path)
+
+    # Identify exposure variables
+    exposure_vars = []
+    if description_df is not None and "var" in description_df.columns and "category" in description_df.columns:
+        # List of exposure categories to retain (same as in filter_exposure_variables)
+        exposure_categories = ["cotinine", "diakyl", "dioxins", "furans", "heavy metals",
+                              "hydrocarbons", "nutrients", "pcbs", "perchlorate", "pesticides",
+                              "phenols", "phthalates", "phytoestrogens", "polybrominated ethers",
+                              "polyflourochemicals", "volatile compounds"]
+
+        # Filter variables that belong to the specified exposure categories
+        exposure_vars = list(set(description_df[
+            description_df["category"].isin(exposure_categories)
+        ]["var"]))
+
+        # Keep only exposure variables that are in the data
+        exposure_vars = [var for var in exposure_vars if var in data.columns]
+    else:
+        # If no description file is provided, assume all variables except demographic ones are exposure variables
+        demographic_vars = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic", 
+                           "other_eth", "SES_LEVEL", "education", "SDDSRVYR", "CFDRIGHT", "SEQN"]
+        exposure_vars = [col for col in data.columns if col not in demographic_vars]
+
+    print(f"Identified {len(exposure_vars)} exposure variables")
+
+    # Identify variable types
+    var_types = identify_variable_types(data[exposure_vars])
+
+    # Count the number of continuous and categorical variables
+    continuous_vars = [var for var, type_ in var_types.items() if type_ == 'continuous']
+    categorical_vars = [var for var, type_ in var_types.items() if type_ == 'categorical']
+
+    print(f"Identified {len(continuous_vars)} continuous variables and {len(categorical_vars)} categorical variables")
+
+    # Create a copy of the data for imputation
+    imputed_data = data.copy()
+
+    # Initialize performance metrics dictionary
+    performance_metrics = {}
+
+    # Initialize performance metrics dictionary
+    for var_type, vars_list in [('continuous', continuous_vars), ('categorical', categorical_vars)]:
+        if not vars_list:
+            continue
+        for var in vars_list:
+            performance_metrics[var] = {'rmse': 0.0, 'mae': 0.0, 'r2': 0.0}
+
+    # Skip cross-validation if requested
+    if skip_cv:
+        print("Skipping cross-validation as requested")
+    else:
+        print("Performing cross-validation to assess imputation performance...")
+        # Perform cross-validation to assess imputation performance
+        kf = KFold(n_splits=n_cv_folds, shuffle=True, random_state=random_state)
+
+        # Process continuous and categorical variables separately
+        for var_type, vars_list in [('continuous', continuous_vars), ('categorical', categorical_vars)]:
+            if not vars_list:
+                continue
+
+            print(f"Cross-validating {var_type} variables...")
+
+            # Filter out columns with all missing values
+            non_empty_vars = [var for var in vars_list if not data[var].isna().all()]
+            print(f"  Found {len(non_empty_vars)} non-empty {var_type} variables out of {len(vars_list)}")
+
+            # Skip if no non-empty variables
+            if not non_empty_vars:
+                print(f"  Skipping {var_type} variables (all have only missing values)")
+                continue
+
+            # Process variables in batches to show progress
+            batch_size = max(1, len(non_empty_vars) // 10)  # Show progress for every 10% of variables
+            for i in range(0, len(non_empty_vars), batch_size):
+                batch_vars = non_empty_vars[i:i+batch_size]
+                print(f"  Processing batch {i//batch_size + 1}/{(len(non_empty_vars) + batch_size - 1)//batch_size} ({len(batch_vars)} variables)")
+
+                # Process each variable in the batch
+                for var in batch_vars:
+                    # Skip variables with no missing values
+                    if not data[var].isna().any():
+                        print(f"    Skipping {var} (no missing values)")
+                        continue
+
+                    # Get rows with non-NaN values for this variable
+                    rows_with_var = data[~data[var].isna()].index
+
+                    # Skip variables with all missing values
+                    if len(rows_with_var) == 0:
+                        print(f"    Skipping {var} (all values are missing)")
+                        continue
+
+                    # Initialize metrics for this variable
+                    rmse_scores = []
+                    mae_scores = []
+
+                    # Perform cross-validation
+                    for fold, (train_idx, test_idx) in enumerate(kf.split(rows_with_var)):
+                        # Get training and testing indices
+                        train_rows = rows_with_var[train_idx]
+                        test_rows = rows_with_var[test_idx]
+
+                        # Create a copy of the data with the test values set to NaN
+                        cv_data = data.copy()
+                        true_values = cv_data.loc[test_rows, var].copy()
+                        cv_data.loc[test_rows, var] = np.nan
+
+                        # Impute the missing values
+                        if var_type == 'continuous':
+                            try:
+                                # Filter out columns with all missing values
+                                non_empty_cols = [col for col in vars_list if not cv_data[col].isna().all()]
+
+                                # Skip if the current variable is not in non_empty_cols
+                                if var not in non_empty_cols:
+                                    print(f"    Skipping {var} in fold {fold+1} (all values are missing after filtering)")
+                                    continue
+
+                                # Use IterativeImputer for continuous variables with simplified estimator
+                                imputer = IterativeImputer(
+                                    estimator=RandomForestRegressor(n_estimators=n_estimators, random_state=random_state),
+                                    random_state=random_state,
+                                    max_iter=max_iter,
+                                    skip_complete=True
+                                )
+
+                                # Fit the imputer on the training data (excluding the test rows)
+                                imputer.fit(cv_data.loc[train_rows, non_empty_cols])
+
+                                # Transform the entire dataset
+                                imputed_values = imputer.transform(cv_data[non_empty_cols])
+
+                                # Get the column index of the current variable in non_empty_cols
+                                var_idx = non_empty_cols.index(var)
+
+                                # Extract just the column for the current variable
+                                var_imputed_values = imputed_values[:, var_idx]
+
+                                # Create a Series with the imputed values for just this variable
+                                predicted_values = pd.Series(var_imputed_values, index=cv_data.index)
+
+                                # Get the imputed values for the test rows
+                                predicted_values = predicted_values.loc[test_rows]
+                            except Exception as e:
+                                print(f"    Error imputing {var} in fold {fold+1}: {str(e)}")
+                                continue
+                        else:
+                            # Use SimpleImputer with most_frequent strategy for categorical variables
+                            imputer = SimpleImputer(strategy='most_frequent')
+
+                            # Fit the imputer on the training data
+                            imputer.fit(cv_data.loc[train_rows, [var]])
+
+                            # Transform the test data
+                            imputed_values = imputer.transform(cv_data.loc[test_rows, [var]])
+                            predicted_values = pd.Series(imputed_values.flatten(), index=test_rows)
+
+                        # Calculate performance metrics
+                        rmse = np.sqrt(mean_squared_error(true_values, predicted_values))
+                        mae = mean_absolute_error(true_values, predicted_values)
+
+                        rmse_scores.append(rmse)
+                        mae_scores.append(mae)
+
+                    # Calculate average performance metrics
+                    if rmse_scores:
+                        avg_rmse = np.mean(rmse_scores)
+                        avg_mae = np.mean(mae_scores)
+
+                        # Store the performance metrics
+                        performance_metrics[var]['rmse'] = avg_rmse
+                        performance_metrics[var]['mae'] = avg_mae
+
+                        print(f"    {var}: Average RMSE: {avg_rmse:.4f}, Average MAE: {avg_mae:.4f}")
+
+    # Perform the final imputation on the entire dataset
+    print("Performing final imputation on the entire dataset...")
+
+    # Impute continuous variables
+    if continuous_vars:
+        print("Imputing continuous variables...")
+
+        # Filter out columns with all missing values
+        non_empty_continuous_vars = [col for col in continuous_vars if not imputed_data[col].isna().all()]
+
+        if non_empty_continuous_vars:
+            print(f"  Found {len(non_empty_continuous_vars)} continuous variables with at least one non-missing value")
+
+            # Process variables in smaller batches to avoid memory issues
+            batch_size = min(20, len(non_empty_continuous_vars))  # Process up to 20 variables at a time
+            num_batches = (len(non_empty_continuous_vars) + batch_size - 1) // batch_size
+
+            print(f"  Processing in {num_batches} batches of up to {batch_size} variables each")
+
+            for batch_idx in range(num_batches):
+                start_idx = batch_idx * batch_size
+                end_idx = min((batch_idx + 1) * batch_size, len(non_empty_continuous_vars))
+                batch_vars = non_empty_continuous_vars[start_idx:end_idx]
+
+                print(f"  Batch {batch_idx + 1}/{num_batches}: Imputing {len(batch_vars)} variables")
+
+                try:
+                    # Use a simpler estimator and fewer iterations for faster imputation
+                    continuous_imputer = IterativeImputer(
+                        estimator=RandomForestRegressor(n_estimators=n_estimators, random_state=random_state),
+                        random_state=random_state,
+                        max_iter=max_iter,
+                        skip_complete=True
+                    )
+
+                    # Fit and transform just this batch
+                    imputed_continuous = continuous_imputer.fit_transform(imputed_data[batch_vars])
+
+                    # Update each column individually to avoid shape mismatch issues
+                    for i, col in enumerate(batch_vars):
+                        imputed_data[col] = imputed_continuous[:, i]
+
+                    print(f"    Successfully imputed batch {batch_idx + 1}")
+                except Exception as e:
+                    print(f"    Error during batch {batch_idx + 1} imputation: {str(e)}")
+                    print("    Proceeding with next batch")
+
+            print(f"  Completed imputation of continuous variables")
+        else:
+            print("  No continuous variables with non-missing values found")
+
+    # Impute categorical variables
+    if categorical_vars:
+        print("Imputing categorical variables...")
+        for var in categorical_vars:
+            # Skip variables with no missing values
+            if not imputed_data[var].isna().any():
+                continue
+
+            categorical_imputer = SimpleImputer(strategy='most_frequent')
+            imputed_categorical = categorical_imputer.fit_transform(imputed_data[[var]])
+            imputed_data[var] = imputed_categorical
+
+    # Save the imputed dataset if output_path is provided
+    if output_path:
+        print(f"Saving imputed dataset to {output_path}...")
+        imputed_data.to_csv(output_path)
+
+    return imputed_data, performance_metrics

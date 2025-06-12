@@ -9,6 +9,7 @@ of cognitive decline in NHANES data and for downloading NHANES data.
 import argparse
 import os
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 from excog_trajectory import data, analysis, visualization
 
@@ -78,6 +79,64 @@ def parse_args():
         type=str,
         default="nhanes_data.zip",
         help="Name to save the downloaded file as",
+    )
+
+    # Parser for the 'impute' command
+    impute_parser = subparsers.add_parser(
+        "impute", help="Impute missing values in NHANES data using MICE"
+    )
+    impute_parser.add_argument(
+        "--data-path",
+        type=str,
+        default="data/processed/cleaned_nhanes.csv",
+        help="Path to the cleaned NHANES dataset",
+    )
+    impute_parser.add_argument(
+        "--description-path",
+        type=str,
+        default=None,
+        help="Path to the variable description file",
+    )
+    impute_parser.add_argument(
+        "--output-path",
+        type=str,
+        default="data/processed/imputed_nhanes.csv",
+        help="Path to save the imputed dataset",
+    )
+    impute_parser.add_argument(
+        "--n-imputations",
+        type=int,
+        default=5,
+        help="Number of imputations to perform",
+    )
+    impute_parser.add_argument(
+        "--n-cv-folds",
+        type=int,
+        default=5,
+        help="Number of cross-validation folds",
+    )
+    impute_parser.add_argument(
+        "--random-state",
+        type=int,
+        default=42,
+        help="Random state for reproducibility",
+    )
+    impute_parser.add_argument(
+        "--skip-cv",
+        action="store_true",
+        help="Skip cross-validation to speed up imputation",
+    )
+    impute_parser.add_argument(
+        "--max-iter",
+        type=int,
+        default=10,
+        help="Maximum number of iterations for the IterativeImputer",
+    )
+    impute_parser.add_argument(
+        "--n-estimators",
+        type=int,
+        default=50,
+        help="Number of estimators for the RandomForestRegressor",
     )
 
     args = parser.parse_args()
@@ -173,6 +232,53 @@ def run_download(args):
     print(f"Total files extracted: {len(extracted_files)}")
 
 
+def run_imputation(args):
+    """Run the imputation procedure."""
+    # Create output directory if it doesn't exist
+    os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
+
+    print(f"Running imputation procedure...")
+
+    # Call the impute_exposure_variables function
+    imputed_data, performance_metrics = data.impute_exposure_variables(
+        data_path=args.data_path,
+        description_path=args.description_path,
+        output_path=args.output_path,
+        n_imputations=args.n_imputations,
+        n_cv_folds=args.n_cv_folds,
+        random_state=args.random_state,
+        skip_cv=args.skip_cv,
+        max_iter=args.max_iter,
+        n_estimators=args.n_estimators
+    )
+
+    # Print summary of imputation performance
+    print("\nImputation Performance Summary:")
+    print("-------------------------------")
+
+    # Calculate average RMSE and MAE across all variables
+    avg_rmse = np.mean([metrics['rmse'] for metrics in performance_metrics.values()])
+    avg_mae = np.mean([metrics['mae'] for metrics in performance_metrics.values()])
+
+    print(f"Average RMSE across all variables: {avg_rmse:.4f}")
+    print(f"Average MAE across all variables: {avg_mae:.4f}")
+
+    # Print the number of imputed values
+    # Count NaN values in the original data
+    original_data = pd.read_csv(args.data_path, index_col=0)
+    original_nan_count = original_data.isna().sum().sum()
+
+    # Count NaN values in the imputed data
+    imputed_nan_count = imputed_data.isna().sum().sum()
+
+    # Calculate the number of imputed values
+    num_imputed = original_nan_count - imputed_nan_count
+    print(f"Total number of imputed values: {num_imputed}")
+
+    print(f"\nImputed dataset saved to {args.output_path}")
+    print("Imputation complete!")
+
+
 def main():
     """Main entry point for the CLI."""
     args = parse_args()
@@ -182,6 +288,8 @@ def main():
         run_analysis(args)
     elif args.command == "download":
         run_download(args)
+    elif args.command == "impute":
+        run_imputation(args)
     else:
         print(f"Unknown command: {args.command}")
         exit(1)

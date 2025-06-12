@@ -13,6 +13,10 @@ The goal of this project is to investigate how various environmental exposures (
   - Remove variables with less than 200 non-NaN values
   - Remove categorical variables with less than 200 values in a category
   - Remove variables with 90% of non-NaN values equal to zero
+- Impute missing values in exposure variables using Multiple Imputation by Chained Equations (MICE):
+  - Consider variable types (continuous vs categorical) for appropriate imputation methods
+  - Use cross-validation to assess imputation performance
+  - Focus imputation only on exposure variables
 - Analyze relationships between exposures and cognitive outcomes using various statistical methods
 - Examine longitudinal trajectories of cognitive decline in relation to exposure levels
 - Visualize exposure-outcome relationships and analysis results
@@ -72,6 +76,22 @@ excog analyze --cycle "2013-2014"
 excog analyze --data-path path/to/data --output-dir path/to/results
 ```
 
+#### Impute Missing Values
+
+```bash
+# Run the imputation procedure with default settings
+excog impute
+
+# Specify a different data path or output path
+excog impute --data-path path/to/cleaned_data.csv --output-path path/to/imputed_data.csv
+
+# Specify a variable description file
+excog impute --description-path path/to/description.csv
+
+# Customize imputation parameters
+excog impute --n-imputations 10 --n-cv-folds 10 --random-state 123
+```
+
 ### Python API
 
 You can also use the package as a Python library:
@@ -89,9 +109,21 @@ exposure_data = data.get_exposure_data(nhanes_data)
 # Merge the data
 merged_data = data.merge_cognitive_exposure_data(cognitive_data, exposure_data)
 
-# Run analysis
+# Impute missing values in exposure variables
+imputed_data, performance_metrics = data.impute_exposure_variables(
+    data_path="data/processed/cleaned_nhanes.csv",
+    output_path="data/processed/imputed_nhanes.csv",
+    n_cv_folds=5,
+    random_state=42
+)
+
+# Print imputation performance metrics
+for var, metrics in performance_metrics.items():
+    print(f"{var}: RMSE = {metrics['rmse']:.4f}, MAE = {metrics['mae']:.4f}")
+
+# Run analysis on the imputed data
 model_results = analysis.run_linear_models(
-    data=merged_data,
+    data=imputed_data,
     outcome_vars=["CFDDS", "CFDST"],  # Digit Symbol Substitution Test scores
     exposure_vars=["LBXBPB", "LBXBCD"],  # Blood lead and cadmium levels
     covariates=["RIDAGEYR", "RIAGENDR", "RIDRETH1", "DMDEDUC2"]  # Demographics
