@@ -458,13 +458,14 @@ def test_filter_exposure_variables():
 
 
 def test_get_percentage_missing():
-    """Test that get_percentage_missing correctly calculates the percentage of missing data for each column."""
-    # Create a DataFrame with NaN values in specific columns
+    """Test that get_percentage_missing correctly calculates the percentage of missing data for each column by survey year in wide format."""
+    # Create a DataFrame with NaN values in specific columns and survey years
     test_data = pd.DataFrame({
+        "SDDSRVYR": [1, 1, 2, 2, 2],  # Two survey years: 1 and 2
         "SEQN": [1, 2, 3, 4, 5],
-        "COL_WITH_NAN_1": [10, None, 30, 40, 50],  # 20% missing
+        "COL_WITH_NAN_1": [10, None, 30, 40, 50],  # 20% missing overall, 50% for year 1, 0% for year 2
         "COL_WITHOUT_NAN": [1, 2, 3, 4, 5],  # 0% missing
-        "COL_WITH_NAN_2": [1, 2, 3, float('nan'), 5]  # 20% missing
+        "COL_WITH_NAN_2": [1, 2, 3, float('nan'), 5]  # 20% missing overall, 0% for year 1, 33.33% for year 2
     })
 
     # Call the function
@@ -475,46 +476,57 @@ def test_get_percentage_missing():
 
     # Check that the result has the expected columns
     assert "column_name" in result.columns
-    assert "percentage_missing" in result.columns
+    assert "year_1_missing_pct" in result.columns
+    assert "year_2_missing_pct" in result.columns
 
-    # Check that the result contains all columns
-    assert len(result) == 4
-    assert "SEQN" in result["column_name"].values
-    assert "COL_WITH_NAN_1" in result["column_name"].values
-    assert "COL_WITHOUT_NAN" in result["column_name"].values
-    assert "COL_WITH_NAN_2" in result["column_name"].values
+    # Check that the result contains one row for each column in the original data
+    assert len(result) == 5  # 5 columns in the original data
 
-    # Check that the percentages are correct
+    # Check percentages for each column and year
     seqn_row = result[result["column_name"] == "SEQN"]
-    assert seqn_row["percentage_missing"].values[0] == 0.0
+    assert seqn_row["year_1_missing_pct"].values[0] == 0.0
+    assert seqn_row["year_2_missing_pct"].values[0] == 0.0
 
     col1_row = result[result["column_name"] == "COL_WITH_NAN_1"]
-    assert col1_row["percentage_missing"].values[0] == 20.0
+    assert col1_row["year_1_missing_pct"].values[0] == 50.0  # 1 out of 2 values is NaN
+    assert col1_row["year_2_missing_pct"].values[0] == 0.0  # No NaN in year 2
 
     col2_row = result[result["column_name"] == "COL_WITHOUT_NAN"]
-    assert col2_row["percentage_missing"].values[0] == 0.0
+    assert col2_row["year_1_missing_pct"].values[0] == 0.0
+    assert col2_row["year_2_missing_pct"].values[0] == 0.0
 
     col3_row = result[result["column_name"] == "COL_WITH_NAN_2"]
-    assert col3_row["percentage_missing"].values[0] == 20.0
+    assert col3_row["year_1_missing_pct"].values[0] == 0.0  # No NaN in year 1
+    assert col3_row["year_2_missing_pct"].values[0] == 33.33333333333333  # 1 out of 3 values is NaN
 
     # Test with a DataFrame that has no NaN values
     test_data_no_nan = pd.DataFrame({
+        "SDDSRVYR": [1, 1, 2],
         "COL1": [1, 2, 3],
         "COL2": [4, 5, 6]
     })
     result_no_nan = data.get_percentage_missing(test_data_no_nan)
     assert isinstance(result_no_nan, pd.DataFrame)
-    assert len(result_no_nan) == 2
-    assert all(result_no_nan["percentage_missing"] == 0.0)
+    assert len(result_no_nan) == 3  # 3 columns in the original data
+
+    # Check that all percentages are 0.0
+    for col in result_no_nan.columns:
+        if col != "column_name":  # Skip the column_name column
+            assert all(result_no_nan[col] == 0.0)
 
     # Test with multiple NaN values in a column
     test_data_multiple_nan = pd.DataFrame({
-        "COL_WITH_MULTIPLE_NAN": [1, None, 3, None, None]  # 60% missing
+        "SDDSRVYR": [1, 1, 1, 2, 2],
+        "COL_WITH_MULTIPLE_NAN": [1, None, 3, None, None]  # 60% missing overall, 33.33% for year 1, 100% for year 2
     })
     result_multiple_nan = data.get_percentage_missing(test_data_multiple_nan)
     assert isinstance(result_multiple_nan, pd.DataFrame)
-    assert len(result_multiple_nan) == 1
-    assert result_multiple_nan["percentage_missing"].values[0] == 60.0
+    assert len(result_multiple_nan) == 2  # 2 columns in the original data
+
+    # Check percentages for each column and year
+    col_row = result_multiple_nan[result_multiple_nan["column_name"] == "COL_WITH_MULTIPLE_NAN"]
+    assert col_row["year_1_missing_pct"].values[0] == 33.33333333333333  # 1 out of 3 values is NaN
+    assert col_row["year_2_missing_pct"].values[0] == 100.0  # 2 out of 2 values are NaN
 
 
 def test_apply_qc_rules():
@@ -531,15 +543,17 @@ def test_apply_qc_rules():
     # - few_non_nan: a variable with less than 200 non-NaN values (Rule 1)
     # - categorical_few: a categorical variable with less than 200 values in a category (Rule 2)
     # - mostly_zeros: a variable with 90% of non-NaN values equal to zero (Rule 3)
+    # - missing_in_year: a variable with 100% missing data in one survey year (Rule 4)
     # - keep_var: a variable that should pass all QC rules
 
     # Create the test data
     import numpy as np
     np.random.seed(42)  # For reproducibility
 
-    # Base DataFrame with IDs
+    # Base DataFrame with IDs and survey years
     test_data = pd.DataFrame({
         "SEQN": range(1, n_rows + 1),
+        "SDDSRVYR": np.concatenate([np.ones(100), np.ones(100) * 2, np.ones(100) * 3])  # 3 survey years
     })
 
     # Cognitive variable (should be preserved)
@@ -563,6 +577,12 @@ def test_apply_qc_rules():
     mostly_zeros[:30] = np.random.normal(1, 0.1, 30)  # Make 10% non-zero
     test_data["mostly_zeros"] = mostly_zeros
 
+    # Variable with 100% missing data in one survey year (should be removed by Rule 4)
+    missing_in_year = np.random.normal(5, 1, n_rows)
+    # Make all values in survey year 2 (indices 100-199) NaN
+    missing_in_year[100:200] = np.nan
+    test_data["missing_in_year"] = missing_in_year
+
     # Variable that should pass all QC rules
     test_data["keep_var"] = np.random.normal(10, 2, n_rows)
 
@@ -585,6 +605,7 @@ def test_apply_qc_rules():
     assert "few_non_nan" not in result.columns  # Rule 1
     assert "categorical_few" not in result.columns  # Rule 2
     assert "mostly_zeros" not in result.columns  # Rule 3
+    assert "missing_in_year" not in result.columns  # Rule 4
 
     # Check that variables that should pass all QC rules are in the result
     assert "keep_var" in result.columns
@@ -593,6 +614,7 @@ def test_apply_qc_rules():
     assert "few_non_nan" in test_data.columns
     assert "categorical_few" in test_data.columns
     assert "mostly_zeros" in test_data.columns
+    assert "missing_in_year" in test_data.columns
 
     # Check that SEQN, covariates, and cognitive_vars are first in the order of columns
     assert list(result.columns)[:3] == ["SEQN", "covariate_var", "cognitive_var"]

@@ -122,34 +122,69 @@ def get_columns_with_nan(data: pd.DataFrame) -> Dict[str, int]:
 
 def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
     """
-    Create a DataFrame that shows the name of each column and the percentage of missing data.
+    Create a DataFrame that shows the name of each column and the percentage of missing data,
+    grouped by survey year (SDDSRVYR), in a wide format.
 
     Parameters
     ----------
     data : pd.DataFrame
-        DataFrame to check for missing values
+        DataFrame to check for missing values. Must contain a 'SDDSRVYR' column.
 
     Returns
     -------
     pd.DataFrame
-        DataFrame with two columns: 'column_name' and 'percentage_missing'
+        DataFrame in wide format where:
+        - Each row represents a variable (column) from the original data
+        - Each column represents a survey year, showing the percentage of missing data for that variable in that year
     """
-    # Get the total number of rows in the DataFrame
-    total_rows = len(data)
+    # Check if SDDSRVYR column exists in the data
+    if 'SDDSRVYR' not in data.columns:
+        raise ValueError("DataFrame must contain a 'SDDSRVYR' column")
 
-    # Calculate the percentage of missing values for each column
-    missing_percentages = {col: (data[col].isna().sum() / total_rows) * 100 for col in data.columns}
+    # Initialize an empty list to store results
+    results = []
 
-    # Convert the dictionary to a DataFrame
-    missing_df = pd.DataFrame({
-        'column_name': list(missing_percentages.keys()),
-        'percentage_missing': list(missing_percentages.values())
-    })
+    # Get unique survey years
+    survey_years = data['SDDSRVYR'].unique()
 
-    # Sort by percentage missing (descending)
-    missing_df = missing_df.sort_values('percentage_missing', ascending=False)
+    # For each survey year, calculate the percentage of missing values for each column
+    for year in survey_years:
+        # Filter data for the current survey year
+        year_data = data[data['SDDSRVYR'] == year]
 
-    return missing_df
+        # Get the total number of rows for this survey year
+        total_rows = len(year_data)
+
+        # Calculate the percentage of missing values for each column
+        for col in data.columns:
+            missing_percentage = (year_data[col].isna().sum() / total_rows) * 100
+
+            # Add the result to our list
+            results.append({
+                'survey_year': year,
+                'column_name': col,
+                'percentage_missing': missing_percentage
+            })
+
+    # Convert the list of dictionaries to a DataFrame
+    long_df = pd.DataFrame(results)
+
+    # Pivot the DataFrame to get it in wide format
+    # Each row will be a column from the original data
+    # Each column will be a survey year
+    wide_df = long_df.pivot(index='column_name', columns='survey_year', values='percentage_missing')
+
+    # Rename the columns to make them more descriptive
+    wide_df.columns = [f'year_{year}_missing_pct' for year in wide_df.columns]
+
+    # Reset the index to make 'column_name' a regular column
+    wide_df = wide_df.reset_index()
+
+    # Sort by the first year's missing percentage (descending)
+    if len(wide_df.columns) > 1:  # Make sure there's at least one year column
+        wide_df = wide_df.sort_values(wide_df.columns[1], ascending=False)
+
+    return wide_df
 
 
 def filter_variables(data: pd.DataFrame, vars_to_filter: List[str], vars_to_keep: Optional[List[str]] = None) -> pd.DataFrame:
@@ -227,18 +262,18 @@ def filter_exposure_variables(nhanes_data: Dict[str, pd.DataFrame], vars_to_keep
         raise KeyError("nhanes_data['description'] must contain 'var' and 'category' columns")
 
     # List of exposure categories to retain
-    exposure_categories = ["alcohol use",
-                           "bacterial infection",
+    exposure_categories = [# "alcohol use",
+                           # "bacterial infection",
                            "cotinine",
                            "diakyl",
                            "dioxins",
-                           "food component recall",
+                           # "food component recall",
                            "furans",
                            "heavy metals",
-                           "housing",
+                           # "housing",
                            "hydrocarbons",
                            "nutrients",
-                           "occupation",
+                           # "occupation",
                            "pcbs",
                            "perchlorate",
                            "pesticides",
@@ -247,14 +282,14 @@ def filter_exposure_variables(nhanes_data: Dict[str, pd.DataFrame], vars_to_keep
                            "phytoestrogens",
                            "polybrominated ethers",
                            "polyflourochemicals",
-                           "sexual behavior",
-                           "smoking behavior",
-                           "smoking family",
-                           "social support",
-                           "street drug",
-                           "sun exposure",
-                           "supplement use",
-                           "viral infection",
+                           # "sexual behavior",
+                           # "smoking behavior",
+                           # "smoking family",
+                           # "social support",
+                           # "street drug",
+                           # "sun exposure",
+                           # "supplement use",
+                           # "viral infection",
                            "volatile compounds"]
 
     # Filter variables that belong to the specified exposure categories
@@ -354,6 +389,7 @@ def apply_qc_rules(
     1. Remove variables with less than 200 non-NaN values
     2. Remove categorical variables with less than 200 values in a category
     3. Remove variables with 90% of non-NaN values equal to zero
+    4. Remove variables with 100% missing data in at least one survey year
 
     These rules are applied to all variables except cognitive and covariate variables.
     The returned DataFrame will have SEQN, covariates, and cognitive_vars first in the order of columns.
@@ -392,6 +428,7 @@ def apply_qc_rules(
     removed_vars_rule1 = []
     removed_vars_rule2 = []
     removed_vars_rule3 = []
+    removed_vars_rule4 = []
 
     # Apply Rule 1: Remove variables with less than 200 non-NaN values
     for var in vars_to_check:
@@ -435,11 +472,45 @@ def apply_qc_rules(
         else:
             vars_passing_qc.append(var)
 
+    # Update vars_to_check to only include variables that passed Rule 3
+    vars_to_check = vars_passing_qc.copy()
+    vars_passing_qc = []
+
+    # Apply Rule 4: Remove variables with 100% missing data in at least one survey year
+    # Check if SDDSRVYR column exists in the data
+    if 'SDDSRVYR' in data.columns:
+        # Get percentage of missing data by survey year
+        missing_by_year = get_percentage_missing(data)
+
+        # Find variables with 100% missing data in at least one survey year
+        for var in vars_to_check:
+            # Skip variables that are not in the data (should not happen, but just in case)
+            if var not in data.columns:
+                continue
+
+            # Get missing percentages for this variable across all survey years
+            var_missing = missing_by_year[missing_by_year['column_name'] == var]
+
+            # Check if any survey year has 100% missing data
+            # Get all columns except 'column_name' (these are the survey year columns)
+            year_columns = [col for col in missing_by_year.columns if col != 'column_name']
+
+            # Check if any survey year has 100% missing data
+            if any(var_missing[col].values[0] == 100.0 for col in year_columns):
+                removed_vars_rule4.append(var)
+            else:
+                vars_passing_qc.append(var)
+    else:
+        # If SDDSRVYR column doesn't exist, skip this rule
+        print("Warning: SDDSRVYR column not found, skipping Rule 4")
+        vars_passing_qc = vars_to_check.copy()
+
     # Print summary of removed variables
     print(f"QC Rule 1: Removed {len(removed_vars_rule1)} variables with less than 200 non-NaN values")
     print(f"QC Rule 2: Removed {len(removed_vars_rule2)} categorical variables with less than 200 values in a category")
     print(f"QC Rule 3: Removed {len(removed_vars_rule3)} variables with 90% of non-NaN values equal to zero")
-    print(f"Total variables removed: {len(removed_vars_rule1) + len(removed_vars_rule2) + len(removed_vars_rule3)}")
+    print(f"QC Rule 4: Removed {len(removed_vars_rule4)} variables with 100% missing data in at least one survey year")
+    print(f"Total variables removed: {len(removed_vars_rule1) + len(removed_vars_rule2) + len(removed_vars_rule3) + len(removed_vars_rule4)}")
     print(f"Variables remaining: {len(vars_passing_qc) + len(excluded_vars)} out of {len(all_vars)}")
 
     # Use the filter_variables function to get the final dataset

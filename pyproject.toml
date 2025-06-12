@@ -26,6 +26,7 @@ dependencies = [
     "scikit-learn==1.7.0",
     "statsmodels>=0.13.0",
     "fonttools==4.58.2",
+    "pandas-stubs==2.2.3.250527",
 ]
 
 [project.scripts]

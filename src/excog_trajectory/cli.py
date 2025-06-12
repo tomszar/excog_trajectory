@@ -101,7 +101,7 @@ def run_analysis(args):
 
     # Define variables for analysis
     cognitive_vars = ["CFDRIGHT"]  # Cognitive function right responses
-    covariates = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic", "other_eth", "SES_LEVEL", "education"]  # Demographics
+    covariates = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic", "other_eth", "SES_LEVEL", "education", "SDDSRVYR"]  # Demographics and survey cycle]  # Demographics
 
     # Keep only relevant columns in the main DataFrame
     print("Filtering NHANES data to keep only relevant columns...")
