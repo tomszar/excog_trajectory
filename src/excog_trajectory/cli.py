@@ -138,6 +138,24 @@ def parse_args():
         default=50,
         help="Number of estimators for the RandomForestRegressor",
     )
+    impute_parser.add_argument(
+        "--n-random-vars",
+        type=int,
+        default=None,
+        help="Number of random variables to select for imputation. If not provided, all variables are used.",
+    )
+    impute_parser.add_argument(
+        "--results-dir",
+        type=str,
+        default="results",
+        help="Directory to save results and performance metrics",
+    )
+    impute_parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=-1,
+        help="Number of CPU cores to use for parallel processing. -1 means using all processors.",
+    )
 
     args = parser.parse_args()
 
@@ -177,7 +195,7 @@ def run_analysis(args):
 
     # Apply QC rules to all variables except cognitive and covariate variables
     print("Applying QC rules to variables...")
-    nhanes_data["main"] = data.apply_qc_rules(nhanes_data["main"], cognitive_vars, covariates)
+    nhanes_data["main"] = data.apply_qc_rules(nhanes_data["main"], cognitive_vars, covariates, standardize=True)
 
     # Save the cleaned data
     nhanes_data["main"].to_csv(os.path.join(args.output_data, "cleaned_nhanes.csv"), index=True)
@@ -237,6 +255,9 @@ def run_imputation(args):
     # Create output directory if it doesn't exist
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
 
+    # Create results directory if it doesn't exist
+    os.makedirs(args.results_dir, exist_ok=True)
+
     print(f"Running imputation procedure...")
 
     # Call the impute_exposure_variables function
@@ -249,7 +270,9 @@ def run_imputation(args):
         random_state=args.random_state,
         skip_cv=args.skip_cv,
         max_iter=args.max_iter,
-        n_estimators=args.n_estimators
+        n_estimators=args.n_estimators,
+        n_random_vars=args.n_random_vars,
+        n_jobs=args.n_jobs
     )
 
     # Print summary of imputation performance
@@ -276,6 +299,28 @@ def run_imputation(args):
     print(f"Total number of imputed values: {num_imputed}")
 
     print(f"\nImputed dataset saved to {args.output_path}")
+
+    # Save performance metrics to a CSV file
+    metrics_df = pd.DataFrame([
+        {"variable": var, "rmse": metrics["rmse"], "mae": metrics["mae"]}
+        for var, metrics in performance_metrics.items()
+    ])
+
+    # Add a row with average metrics
+    metrics_df = pd.concat([
+        metrics_df,
+        pd.DataFrame([{
+            "variable": "AVERAGE",
+            "rmse": avg_rmse,
+            "mae": avg_mae
+        }])
+    ])
+
+    # Save to CSV
+    metrics_file = os.path.join(args.results_dir, "imputation_performance.csv")
+    metrics_df.to_csv(metrics_file, index=False)
+    print(f"Performance metrics saved to {metrics_file}")
+
     print("Imputation complete!")
 
 
