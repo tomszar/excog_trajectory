@@ -7,7 +7,7 @@ name = "excog-trajectory"
 version = "0.1.0"
 description = "Analysis of exposomic trajectories of cognitive decline in NHANES"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
     {name = "Your Name", email = "your.email@example.com"},
@@ -18,14 +18,14 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "numpy>=1.20.0",
+    "numpy==2.3.0",
     "pandas==2.3.0",
     "scipy>=1.7.0",
     "matplotlib>=3.4.0",
     "seaborn>=0.11.0",
     "scikit-learn==1.7.0",
     "statsmodels>=0.13.0",
-    "fonttools==4.58.2",
+    "fonttools==4.58.3",
     "pandas-stubs==2.2.3.250527",
 ]
 
