@@ -110,33 +110,16 @@ def parse_args():
         help="Number of imputations to perform",
     )
     impute_parser.add_argument(
-        "--n-cv-folds",
-        type=int,
-        default=5,
-        help="Number of cross-validation folds",
-    )
-    impute_parser.add_argument(
         "--random-state",
         type=int,
         default=42,
         help="Random state for reproducibility",
     )
     impute_parser.add_argument(
-        "--skip-cv",
-        action="store_true",
-        help="Skip cross-validation to speed up imputation",
-    )
-    impute_parser.add_argument(
-        "--max-iter",
+        "--n-iterations",
         type=int,
-        default=10,
-        help="Maximum number of iterations for the IterativeImputer",
-    )
-    impute_parser.add_argument(
-        "--n-estimators",
-        type=int,
-        default=50,
-        help="Number of estimators for the RandomForestRegressor",
+        default=3,
+        help="Number of iterations for the imputation procedure",
     )
     impute_parser.add_argument(
         "--n-random-vars",
@@ -266,13 +249,10 @@ def run_imputation(args):
         description_path=args.description_path,
         output_path=args.output_path,
         n_imputations=args.n_imputations,
-        n_cv_folds=args.n_cv_folds,
         random_state=args.random_state,
-        skip_cv=args.skip_cv,
-        max_iter=args.max_iter,
-        n_estimators=args.n_estimators,
         n_random_vars=args.n_random_vars,
-        n_jobs=args.n_jobs
+        n_jobs=args.n_jobs,
+        n_iterations=3  # Fixed at 3 iterations as per requirements
     )
 
     # Print summary of imputation performance

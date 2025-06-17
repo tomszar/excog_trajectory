@@ -11,18 +11,9 @@ import pandas as pd
 import zipfile
 import shutil
 import numpy as np
+import miceforest as mf
 from typing import Dict, List, Optional, Union, Tuple, Set
-from sklearn.experimental import enable_iterative_imputer
-from sklearn.impute import IterativeImputer, SimpleImputer, KNNImputer
-from sklearn.model_selection import KFold
-from sklearn.metrics import mean_squared_error, mean_absolute_error
-from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
-from sklearn.linear_model import BayesianRidge
-from sklearn.neighbors import KNeighborsRegressor
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from joblib import Parallel, delayed
-import matplotlib.pyplot as plt
-import seaborn as sns
+from sklearn.preprocessing import StandardScaler
 
 
 def load_nhanes_data(
@@ -650,96 +641,49 @@ def identify_variable_types(data: pd.DataFrame) -> Dict[str, str]:
 
 def impute_exposure_variables(
     data_path: str = "data/processed/cleaned_nhanes.csv",
-    description_path: Optional[str] = None,
     output_path: Optional[str] = None,
     n_imputations: int = 5,
-    n_cv_folds: int = 5,
     random_state: int = 42,
-    skip_cv: bool = False,
-    max_iter: int = 10,
-    n_estimators: int = 50,
     n_random_vars: Optional[int] = None,
-    n_jobs: int = -1,
-    cv_results_path: Optional[str] = None,
-    plot_path: Optional[str] = None
-) -> Tuple[pd.DataFrame, Dict[str, Dict[str, float]]]:
+    n_iterations: int = 3
+) -> mf.ImputationKernel:
     """
-    Impute missing values in exposure variables using Multiple Imputation by Chained Equations (MICE).
+    Impute missing values in exposure variables using Multiple Imputation by Chained Equations (MICE)
+    with miceforest.
 
     This function:
     1. Loads the cleaned NHANES dataset
     2. Identifies exposure variables
-    3. Determines variable types (continuous vs categorical)
-    4. Implements MICE imputation with cross-validation
-    5. Returns the imputed dataset and imputation performance metrics
+    3. Implements MICE imputation using miceforest
+    4. Generates multiple imputed datasets
+    5. Saves the imputed datasets with appropriate names
 
     Parameters
     ----------
     data_path : str, optional
         Path to the cleaned NHANES dataset, by default "data/processed/cleaned_nhanes.csv"
-    description_path : Optional[str], optional
-        Path to the variable description file, by default None
     output_path : Optional[str], optional
-        Path to save the imputed dataset, by default None
+        Path to save the imputed datasets, by default None
     n_imputations : int, optional
-        Number of imputations to perform, by default 5
-    n_cv_folds : int, optional
-        Number of cross-validation folds, by default 5
+        Number of imputed datasets to generate, by default 5
     random_state : int, optional
         Random state for reproducibility, by default 42
-    skip_cv : bool, optional
-        Whether to skip cross-validation, by default False
-    max_iter : int, optional
-        Maximum number of iterations for the IterativeImputer, by default 10
-    n_estimators : int, optional
-        Number of estimators for the RandomForestRegressor, by default 50
     n_random_vars : Optional[int], optional
         Number of random variables to select for imputation. If None, all variables are used, by default None
-    n_jobs : int, optional
-        Number of CPU cores to use for parallel processing. -1 means using all processors, by default -1
-    cv_results_path : Optional[str], optional
-        Path to save the cross-validation results as a CSV file, by default None
-    plot_path : Optional[str], optional
-        Path to save the plot of RMSE mean and std values for each imputation method, by default None
+    n_iterations : int, optional
+        Number of iterations for the imputation procedure, by default 3
 
     Returns
     -------
-    Tuple[pd.DataFrame, Dict[str, Dict[str, float]]]
-        A tuple containing:
-        - The imputed DataFrame
-        - A dictionary of imputation performance metrics for each variable
+    ImputationKernel
     """
     # Load the cleaned NHANES dataset
     print(f"Loading cleaned NHANES data from {data_path}...")
     data = pd.read_csv(data_path, index_col=0)
 
-    # Load the variable description file if provided
-    description_df = None
-    if description_path:
-        print(f"Loading variable description from {description_path}...")
-        description_df = pd.read_csv(description_path)
-
-    # Identify exposure variables
-    exposure_vars = []
-    if description_df is not None and "var" in description_df.columns and "category" in description_df.columns:
-        # List of exposure categories to retain (same as in filter_exposure_variables)
-        exposure_categories = ["cotinine", "diakyl", "dioxins", "furans", "heavy metals",
-                              "hydrocarbons", "nutrients", "pcbs", "perchlorate", "pesticides",
-                              "phenols", "phthalates", "phytoestrogens", "polybrominated ethers",
-                              "polyflourochemicals", "volatile compounds"]
-
-        # Filter variables that belong to the specified exposure categories
-        exposure_vars = list(set(description_df[
-            description_df["category"].isin(exposure_categories)
-        ]["var"]))
-
-        # Keep only exposure variables that are in the data
-        exposure_vars = [var for var in exposure_vars if var in data.columns]
-    else:
-        # If no description file is provided, assume all variables except demographic ones are exposure variables
-        demographic_vars = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic", 
-                           "other_eth", "SES_LEVEL", "education", "SDDSRVYR", "CFDRIGHT", "SEQN"]
-        exposure_vars = [col for col in data.columns if col not in demographic_vars]
+    demographic_vars = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic",
+                        "other_eth", "SES_LEVEL", "education", "SDDSRVYR", "CFDRIGHT"]
+    exposure_vars = [col for col in data.columns if col not in demographic_vars]
 
     print(f"Identified {len(exposure_vars)} exposure variables")
 
@@ -752,441 +696,43 @@ def impute_exposure_variables(
         print(f"Randomly selected {len(exposure_vars)} variables for imputation")
 
     # Create a copy of the data for imputation
-    imputed_data = data.copy()
-
-    # Initialize performance metrics dictionary
-    performance_metrics = {}
-
-    # Initialize performance metrics dictionary
-    for var in exposure_vars:
-        performance_metrics[var] = {'rmse': 0.0, 'mae': 0.0, 'r2': 0.0}
-
-    # Helper function to process a single variable during cross-validation
-    def process_variable_cv(var, kf, data, n_estimators, random_state, max_iter):
-        # Skip variables with no missing values
-        if not data[var].isna().any():
-            return var, None, f"Skipping {var} (no missing values)"
-
-        # Get rows with non-NaN values for this variable
-        rows_with_var = data[~data[var].isna()].index
-
-        # Skip variables with all missing values
-        if len(rows_with_var) == 0:
-            return var, None, f"Skipping {var} (all values are missing)"
-
-        # Define imputation methods for continuous variables
-        imputation_methods = {}
-
-        # Define different estimators for IterativeImputer
-        imputation_methods = {
-            'RandomForest': IterativeImputer(
-                estimator=RandomForestRegressor(n_estimators=n_estimators, random_state=random_state),
-                random_state=random_state,
-                max_iter=max_iter,
-                skip_complete=True
-            ),
-            'BayesianRidge': IterativeImputer(
-                estimator=BayesianRidge(),
-                random_state=random_state,
-                max_iter=max_iter,
-                skip_complete=True
-            ),
-            'KNeighborsRegressor': IterativeImputer(
-                estimator=KNeighborsRegressor(n_neighbors=5),
-                random_state=random_state,
-                max_iter=max_iter,
-                skip_complete=True
-            ),
-            'KNNImputer': KNNImputer(n_neighbors=5)
-        }
-
-        # Initialize metrics for this variable
-        results = {}
-        for method_name in imputation_methods:
-            results[method_name] = {
-                'rmse_scores': [],
-                'mae_scores': []
-            }
-
-        # Perform cross-validation
-        for fold, (train_idx, test_idx) in enumerate(kf.split(rows_with_var)):
-            # Get training and testing indices
-            train_rows = rows_with_var[train_idx]
-            test_rows = rows_with_var[test_idx]
-
-            # Create a copy of the data with the test values set to NaN
-            cv_data = data.copy()
-            true_values = cv_data.loc[test_rows, var].copy()
-            cv_data.loc[test_rows, var] = np.nan
-
-            # Impute the missing values using each method
-            # if var_type == 'continuous':
-                # Filter out columns with all missing values
-              #  non_empty_cols = [col for col in vars_list if not cv_data[col].isna().all()]
-
-                # Skip if the current variable is not in non_empty_cols
-                #if var not in non_empty_cols:
-                #     continue
-
-                # Try each imputation method
-                # TODO: there's unnecessary duplication here, make sure imputation makes sense todo for each variable,
-                # instead of doing it for all variables at once
-                for method_name, imputer in imputation_methods.items():
-                    try:
-                        if method_name == 'KNNImputer':
-                            # KNNImputer works differently than IterativeImputer
-                            imputer.fit(cv_data.loc[train_rows, non_empty_vars])
-                            imputed_values = imputer.transform(cv_data.loc[test_rows, non_empty_vars])
-                        else:
-                            # IterativeImputer with different estimators
-                            imputer.fit(cv_data.loc[train_rows, non_empty_vars])
-                            imputed_values = imputer.transform(cv_data[non_empty_vars])
-
-                        # Get the column index of the current variable in non_empty_cols
-                        var_idx = non_empty_vars.index(var)
-
-                        # Extract just the column for the current variable
-                        var_imputed_values = imputed_values[:, var_idx]
-
-                        # Create a Series with the imputed values for just this variable
-                        predicted_values = pd.Series(var_imputed_values, index=cv_data.index)
-
-                        # Get the imputed values for the test rows
-                        predicted_values = predicted_values.loc[test_rows]
-
-                        # Calculate performance metrics
-                        rmse = np.sqrt(mean_squared_error(true_values, predicted_values))
-                        mae = mean_absolute_error(true_values, predicted_values)
-
-                        results[method_name]['rmse_scores'].append(rmse)
-                        results[method_name]['mae_scores'].append(mae)
-                    except Exception as e:
-                        print(f"Error with {method_name} for {var}: {str(e)}")
-                        continue
-            else:
-                # For categorical variables, use SimpleImputer
-                for method_name, imputer in imputation_methods.items():
-                    try:
-                        # Fit the imputer on the training data
-                        imputer.fit(cv_data.loc[train_rows, [var]])
-
-                        # Transform the test data
-                        imputed_values = imputer.transform(cv_data.loc[test_rows, [var]])
-                        predicted_values = pd.Series(imputed_values.flatten(), index=test_rows)
-
-                        # Calculate performance metrics
-                        rmse = np.sqrt(mean_squared_error(true_values, predicted_values))
-                        mae = mean_absolute_error(true_values, predicted_values)
-
-                        results[method_name]['rmse_scores'].append(rmse)
-                        results[method_name]['mae_scores'].append(mae)
-                    except Exception as e:
-                        print(f"Error with {method_name} for {var}: {str(e)}")
-                        continue
-
-        # Calculate average performance metrics for each method
-        metrics = {}
-        message_parts = []
-
-        for method_name, scores in results.items():
-            if scores['rmse_scores']:
-                avg_rmse = np.mean(scores['rmse_scores'])
-                std_rmse = np.std(scores['rmse_scores'])
-                avg_mae = np.mean(scores['mae_scores'])
-
-                metrics[method_name] = {
-                    'rmse': avg_rmse,
-                    'rmse_std': std_rmse,
-                    'mae': avg_mae
-                }
-
-                message_parts.append(f"{method_name}: RMSE={avg_rmse:.4f}±{std_rmse:.4f}")
-
-        if metrics:
-            message = f"{var}: " + ", ".join(message_parts)
-            return var, metrics, message
-        else:
-            return var, None, f"No valid scores for {var}"
-
-    # Initialize the best imputation method
-    best_imputation_method = 'RandomForest'  # Default method
-
-    # Skip cross-validation if requested
-    if skip_cv:
-        print("Skipping cross-validation as requested")
-        print(f"Using default imputation method: {best_imputation_method}")
-    else:
-        print("Performing cross-validation to assess imputation performance...")
-        # Perform cross-validation to assess imputation performance
-        kf = KFold(n_splits=n_cv_folds, shuffle=True, random_state=random_state)
-
-        non_empty_vars = [var for var in exposure_vars if not data[var].isna().all()]
-        print(f"  Found {len(non_empty_vars)} non-empty variables out of {len(exposure_vars)}")
-        print(f"  Processing {len(non_empty_vars)} variables in parallel with {n_jobs} jobs")
-        # Use joblib to parallelize the processing of variables
-        results = Parallel(n_jobs=n_jobs, verbose=10)(
-            delayed(process_variable_cv)(
-                var, non_empty_vars, kf, data, n_estimators, random_state, max_iter
-            ) for var in non_empty_vars
-        )
-        # Process results
-        for var, metrics, message in results:
-            if metrics:
-                performance_metrics[var] = metrics
-                print(f"    {message}")
-            else:
-                print(f"    {message}")
-
-        # After cross-validation, analyze the results to find the best imputation method
-        if performance_metrics:
-            print("\nAnalyzing cross-validation results...")
-
-            # Collect results for each method
-            method_results = {}
-
-            # Iterate through all variables and their metrics
-            for var, metrics in performance_metrics.items():
-                # Skip if metrics is not a dictionary of methods
-                if not isinstance(metrics, dict):
-                    continue
-
-                for method_name, method_metrics in metrics.items():
-                    if method_name not in method_results:
-                        method_results[method_name] = {
-                            'rmse_values': [],
-                            'rmse_std_values': []
-                        }
-
-                    # Add the RMSE and std values for this variable and method
-                    if isinstance(method_metrics, dict) and 'rmse' in method_metrics:
-                        method_results[method_name]['rmse_values'].append(method_metrics['rmse'])
-                        if 'rmse_std' in method_metrics:
-                            method_results[method_name]['rmse_std_values'].append(method_metrics['rmse_std'])
-
-            # Calculate average RMSE and std for each method
-            method_summary = {}
-            for method_name, values in method_results.items():
-                if values['rmse_values']:
-                    method_summary[method_name] = {
-                        'mean_rmse': np.mean(values['rmse_values']),
-                        'std_rmse': np.mean(values['rmse_std_values']) if values['rmse_std_values'] else 0
-                    }
-
-            # Find the best method (lowest average RMSE)
-            best_method = min(method_summary.items(), key=lambda x: x[1]['mean_rmse'])[0]
-            print(f"Best imputation method: {best_method} (Average RMSE: {method_summary[best_method]['mean_rmse']:.4f})")
-
-            # Create a DataFrame with the CV results
-            cv_results_df = pd.DataFrame({
-                'Method': [],
-                'Mean RMSE': [],
-                'Std RMSE': []
-            })
-
-            for method_name, metrics in method_summary.items():
-                cv_results_df = pd.concat([cv_results_df, pd.DataFrame({
-                    'Method': [method_name],
-                    'Mean RMSE': [metrics['mean_rmse']],
-                    'Std RMSE': [metrics['std_rmse']]
-                })], ignore_index=True)
-
-            # Sort by Mean RMSE
-            cv_results_df = cv_results_df.sort_values('Mean RMSE')
-
-            # Save CV results to a table if path is provided
-            if cv_results_path:
-                print(f"Saving CV results to {cv_results_path}")
-                cv_results_df.to_csv(cv_results_path, index=False)
-
-            # Generate a plot showing RMSE mean and std values for each imputation method
-            if plot_path:
-                print(f"Generating plot of RMSE values for each imputation method...")
-
-                plt.figure(figsize=(10, 6))
-
-                # Create bar plot
-                bars = plt.bar(
-                    cv_results_df['Method'], 
-                    cv_results_df['Mean RMSE'],
-                    yerr=cv_results_df['Std RMSE'],
-                    capsize=10,
-                    color=sns.color_palette('viridis', len(cv_results_df))
-                )
-
-                # Add labels and title
-                plt.xlabel('Imputation Method')
-                plt.ylabel('RMSE (Mean ± Std)')
-                plt.title('Comparison of Imputation Methods')
-                plt.xticks(rotation=45)
-                plt.tight_layout()
-
-                # Highlight the best method
-                best_idx = cv_results_df['Method'].tolist().index(best_method)
-                bars[best_idx].set_color('red')
-
-                # Add text labels above bars
-                for i, bar in enumerate(bars):
-                    height = bar.get_height()
-                    plt.text(
-                        bar.get_x() + bar.get_width()/2.,
-                        height + 0.02,
-                        f'{cv_results_df["Mean RMSE"].iloc[i]:.4f}',
-                        ha='center', va='bottom', rotation=0
-                    )
-
-                # Save the plot
-                plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-                print(f"Plot saved to {plot_path}")
-                plt.close()
-
-            # Store the best method for later use
-            best_imputation_method = best_method
-        else:
-            print("No valid cross-validation results found. Using default imputation method.")
-            best_imputation_method = 'RandomForest'
-
-    # Helper function to process a batch of continuous variables during final imputation
-    def process_continuous_batch(batch_vars, data, method_name, n_estimators, random_state, max_iter):
-        try:
-            # Select the appropriate imputer based on the method name
-            if method_name == 'RandomForest':
-                imputer = IterativeImputer(
-                    estimator=RandomForestRegressor(n_estimators=n_estimators, random_state=random_state),
-                    random_state=random_state,
-                    max_iter=max_iter,
-                    skip_complete=True
-                )
-            elif method_name == 'BayesianRidge':
-                imputer = IterativeImputer(
-                    estimator=BayesianRidge(),
-                    random_state=random_state,
-                    max_iter=max_iter,
-                    skip_complete=True
-                )
-            elif method_name == 'KNeighborsRegressor':
-                imputer = IterativeImputer(
-                    estimator=KNeighborsRegressor(n_neighbors=5),
-                    random_state=random_state,
-                    max_iter=max_iter,
-                    skip_complete=True
-                )
-            elif method_name == 'KNNImputer':
-                imputer = KNNImputer(n_neighbors=5)
-            else:
-                # Default to RandomForest if method is not recognized
-                print(f"Warning: Unrecognized method '{method_name}'. Using RandomForest as fallback.")
-                imputer = IterativeImputer(
-                    estimator=RandomForestRegressor(n_estimators=n_estimators, random_state=random_state),
-                    random_state=random_state,
-                    max_iter=max_iter,
-                    skip_complete=True
-                )
-
-            # Fit and transform just this batch
-            imputed_continuous = imputer.fit_transform(data[batch_vars])
-
-            # Create a dictionary to store the imputed values for each column
-            imputed_values = {}
-            for i, col in enumerate(batch_vars):
-                imputed_values[col] = imputed_continuous[:, i]
-
-            return batch_vars, imputed_values, None
-        except Exception as e:
-            return batch_vars, None, str(e)
-
-    # Helper function to process a categorical variable during final imputation
-    def process_categorical_var(var, data):
-        # Skip variables with no missing values
-        if not data[var].isna().any():
-            return var, None, None
-
-        try:
-            categorical_imputer = SimpleImputer(strategy='most_frequent')
-            imputed_categorical = categorical_imputer.fit_transform(data[[var]])
-            return var, imputed_categorical.flatten(), None
-        except Exception as e:
-            return var, None, str(e)
-
-    # Perform the final imputation on the entire dataset
-    print("Performing final imputation on the entire dataset...")
-
-    # Impute continuous variables
-    if continuous_vars:
-        print("Imputing continuous variables...")
-
-        # Filter out columns with all missing values
-        non_empty_continuous_vars = [col for col in continuous_vars if not imputed_data[col].isna().all()]
-
-        if non_empty_continuous_vars:
-            print(f"  Found {len(non_empty_continuous_vars)} continuous variables with at least one non-missing value")
-
-            # Process variables in smaller batches to avoid memory issues
-            batch_size = min(20, len(non_empty_continuous_vars))  # Process up to 20 variables at a time
-            num_batches = (len(non_empty_continuous_vars) + batch_size - 1) // batch_size
-
-            print(f"  Processing in {num_batches} batches in parallel with {n_jobs} jobs")
-
-            # Create batches of variables
-            batches = []
-            for batch_idx in range(num_batches):
-                start_idx = batch_idx * batch_size
-                end_idx = min((batch_idx + 1) * batch_size, len(non_empty_continuous_vars))
-                batches.append(non_empty_continuous_vars[start_idx:end_idx])
-
-            # Process batches in parallel using the best imputation method
-            print(f"  Using {best_imputation_method} for final imputation")
-            results = Parallel(n_jobs=n_jobs, verbose=10)(
-                delayed(process_continuous_batch)(
-                    batch_vars, imputed_data, best_imputation_method, n_estimators, random_state, max_iter
-                ) for batch_vars in batches
-            )
-
-            # Process results
-            for batch_vars, imputed_values, error in results:
-                if imputed_values:
-                    # Update each column with its imputed values
-                    for col, values in imputed_values.items():
-                        imputed_data[col] = values
-                    print(f"    Successfully imputed batch with {len(batch_vars)} variables")
-                else:
-                    print(f"    Error during batch imputation: {error}")
-                    print("    Proceeding with next batch")
-
-            print(f"  Completed imputation of continuous variables")
-        else:
-            print("  No continuous variables with non-missing values found")
-
-    # Impute categorical variables
-    if categorical_vars:
-        print("Imputing categorical variables...")
-
-        # Filter out variables with no missing values
-        vars_to_impute = [var for var in categorical_vars if imputed_data[var].isna().any()]
-
-        if vars_to_impute:
-            print(f"  Found {len(vars_to_impute)} categorical variables with missing values")
-
-            # Process categorical variables in parallel
-            print(f"  Processing {len(vars_to_impute)} variables in parallel with {n_jobs} jobs")
-
-            # Use joblib to parallelize the processing of variables
-            results = Parallel(n_jobs=n_jobs, verbose=10)(
-                delayed(process_categorical_var)(var, imputed_data) for var in vars_to_impute
-            )
-
-            # Process results
-            for var, imputed_values, error in results:
-                if imputed_values is not None:
-                    imputed_data[var] = imputed_values
-                    print(f"    Successfully imputed {var}")
-                elif error:
-                    print(f"    Error imputing {var}: {error}")
-        else:
-            print("  No categorical variables with missing values found")
-
-    # Save the imputed dataset if output_path is provided
+    to_impute = data.loc[:, demographic_vars + exposure_vars].copy().reset_index()
+
+    # Create a dataset for miceforest
+    print("Creating miceforest kernel...")
+
+    # Create the kernel
+    kernel = mf.ImputationKernel(
+        data=to_impute,
+        save_all_iterations_data=False,
+        random_state=random_state,
+        num_datasets=n_imputations,
+    )
+
+    # Run the imputation
+    print(f"Running imputation with {n_iterations} iterations...")
+    kernel.mice(n_iterations)
+
+    # Create output directory if it doesn't exist
     if output_path:
-        print(f"Saving imputed dataset to {output_path}...")
-        imputed_data.to_csv(output_path)
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    return imputed_data, performance_metrics
+    # Generate and save the imputed datasets
+    print(f"Generating {n_imputations} imputed datasets...")
+
+    for i in range(n_imputations):
+        # Get the imputed dataset
+        dataset_num = i + 1
+        imputed_dataset = kernel.complete_data(dataset=i)
+
+        # Save the dataset with appropriate name
+        if output_path is None:
+            output_path = "data/processed/"
+
+        filename = "imputed_nhanes_dat" + str(dataset_num) + ".csv"
+        print(f"Saving imputed dataset {filename} to {output_path}...")
+        imputed_dataset.to_csv(output_path + filename, index=False)
+
+    print("Imputation complete!")
+
+    return kernel
