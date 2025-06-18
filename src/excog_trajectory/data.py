@@ -645,7 +645,8 @@ def impute_exposure_variables(
     n_imputations: int = 5,
     random_state: int = 42,
     n_random_vars: Optional[int] = None,
-    n_iterations: int = 3
+    n_iterations: int = 3,
+    tune_parameters: bool = True,
 ) -> mf.ImputationKernel:
     """
     Impute missing values in exposure variables using Multiple Imputation by Chained Equations (MICE)
@@ -653,10 +654,9 @@ def impute_exposure_variables(
 
     This function:
     1. Loads the cleaned NHANES dataset
-    2. Identifies exposure variables
-    3. Implements MICE imputation using miceforest
-    4. Generates multiple imputed datasets
-    5. Saves the imputed datasets with appropriate names
+    2. Implements MICE imputation using miceforest
+    3. Generates multiple imputed datasets
+    4. Saves the imputed datasets with appropriate names
 
     Parameters
     ----------
@@ -672,6 +672,8 @@ def impute_exposure_variables(
         Number of random variables to select for imputation. If None, all variables are used, by default None
     n_iterations : int, optional
         Number of iterations for the imputation procedure, by default 3
+    tune_parameters : bool
+        Whether to tune the imputation parameters using gradient boosting decision trees (GBDT), by default True.
 
     Returns
     -------
@@ -709,9 +711,16 @@ def impute_exposure_variables(
         num_datasets=n_imputations,
     )
 
-    # Run the imputation
-    print(f"Running imputation with {n_iterations} iterations...")
-    kernel.mice(n_iterations)
+    if tune_parameters:
+        print(f"Running parameter tunning...")
+        optimal_parameters = kernel.tune_parameters(use_gbdt=True)
+        print(f"Running imputation with {n_iterations} iterations...")
+        kernel.mice(n_iterations, variable_parameters=optimal_parameters)
+    elif tune_parameters is False:
+        print(f"Running imputation with {n_iterations} iterations...")
+        kernel.mice(n_iterations)
+    else:
+        raise ValueError("tune_parameters must be True or False")
 
     # Create output directory if it doesn't exist
     if output_path:

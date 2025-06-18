@@ -92,15 +92,9 @@ def parse_args():
         help="Path to the cleaned NHANES dataset",
     )
     impute_parser.add_argument(
-        "--description-path",
-        type=str,
-        default=None,
-        help="Path to the variable description file",
-    )
-    impute_parser.add_argument(
         "--output-path",
         type=str,
-        default="data/processed/imputed_nhanes.csv",
+        default=None,
         help="Path to save the imputed dataset",
     )
     impute_parser.add_argument(
@@ -126,18 +120,6 @@ def parse_args():
         type=int,
         default=None,
         help="Number of random variables to select for imputation. If not provided, all variables are used.",
-    )
-    impute_parser.add_argument(
-        "--results-dir",
-        type=str,
-        default="results",
-        help="Directory to save results and performance metrics",
-    )
-    impute_parser.add_argument(
-        "--n-jobs",
-        type=int,
-        default=-1,
-        help="Number of CPU cores to use for parallel processing. -1 means using all processors.",
     )
 
     args = parser.parse_args()
@@ -235,73 +217,60 @@ def run_download(args):
 
 def run_imputation(args):
     """Run the imputation procedure."""
-    # Create output directory if it doesn't exist
-    os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
-
-    # Create results directory if it doesn't exist
-    os.makedirs(args.results_dir, exist_ok=True)
 
     print(f"Running imputation procedure...")
 
     # Call the impute_exposure_variables function
-    imputed_data, performance_metrics = data.impute_exposure_variables(
+    kernel = data.impute_exposure_variables(
         data_path=args.data_path,
-        description_path=args.description_path,
         output_path=args.output_path,
         n_imputations=args.n_imputations,
         random_state=args.random_state,
         n_random_vars=args.n_random_vars,
-        n_jobs=args.n_jobs,
-        n_iterations=3  # Fixed at 3 iterations as per requirements
+        n_iterations=args.n_iterations,
     )
 
-    # Print summary of imputation performance
-    print("\nImputation Performance Summary:")
-    print("-------------------------------")
+    # Load the description DataFrame for use with correlation matrices
+    print("Loading variable descriptions for correlation matrices...")
+    nhanes_data = data.load_nhanes_data()
+    description_df = nhanes_data["description"]
 
-    # Calculate average RMSE and MAE across all variables
-    avg_rmse = np.mean([metrics['rmse'] for metrics in performance_metrics.values()])
-    avg_mae = np.mean([metrics['mae'] for metrics in performance_metrics.values()])
+    # Set default output path if none is provided
+    output_path = args.output_path
+    if output_path is None:
+        output_path = "data/processed/"
 
-    print(f"Average RMSE across all variables: {avg_rmse:.4f}")
-    print(f"Average MAE across all variables: {avg_mae:.4f}")
+    # Create output directory for correlation matrices if it doesn't exist
+    correlation_output_dir = os.path.join(output_path, "correlation_matrices")
+    os.makedirs(correlation_output_dir, exist_ok=True)
 
-    # Print the number of imputed values
-    # Count NaN values in the original data
-    original_data = pd.read_csv(args.data_path, index_col=0)
-    original_nan_count = original_data.isna().sum().sum()
+    # Create correlation matrices for each imputed dataset
+    print(f"Creating correlation matrices for each imputed dataset...")
+    for i in range(args.n_imputations):
+        dataset_num = i + 1
+        filename = f"imputed_nhanes_dat{dataset_num}.csv"
+        filepath = os.path.join(output_path, filename)
 
-    # Count NaN values in the imputed data
-    imputed_nan_count = imputed_data.isna().sum().sum()
+        print(f"Processing imputed dataset {dataset_num}...")
 
-    # Calculate the number of imputed values
-    num_imputed = original_nan_count - imputed_nan_count
-    print(f"Total number of imputed values: {num_imputed}")
+        # Load the imputed dataset
+        imputed_data = pd.read_csv(filepath)
 
-    print(f"\nImputed dataset saved to {args.output_path}")
+        # Create correlation matrix
+        print(f"Creating correlation matrix for dataset {dataset_num}...")
+        visualization.plot_exposure_correlation_matrix(
+            data=imputed_data,
+            description_df=description_df,
+            save_path=correlation_output_dir,
+            dpi=300,
+        )
 
-    # Save performance metrics to a CSV file
-    metrics_df = pd.DataFrame([
-        {"variable": var, "rmse": metrics["rmse"], "mae": metrics["mae"]}
-        for var, metrics in performance_metrics.items()
-    ])
-
-    # Add a row with average metrics
-    metrics_df = pd.concat([
-        metrics_df,
-        pd.DataFrame([{
-            "variable": "AVERAGE",
-            "rmse": avg_rmse,
-            "mae": avg_mae
-        }])
-    ])
-
-    # Save to CSV
-    metrics_file = os.path.join(args.results_dir, "imputation_performance.csv")
-    metrics_df.to_csv(metrics_file, index=False)
-    print(f"Performance metrics saved to {metrics_file}")
-
-    print("Imputation complete!")
+        # Rename the output file to include dataset number
+        original_file = os.path.join(correlation_output_dir, 'exposure_correlation_matrix.png')
+        new_file = os.path.join(correlation_output_dir, f'exposure_correlation_matrix_dataset{dataset_num}.png')
+        if os.path.exists(original_file):
+            os.rename(original_file, new_file)
+            print(f"Correlation matrix saved as {new_file}")
 
 
 def main():
