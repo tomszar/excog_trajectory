@@ -179,16 +179,27 @@ wheels = [
 ]
 
 [[package]]
+name = "dill"
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/12/80/630b4b88364e9a8c8c5797f4602d0f76ef820909ee32f0bacb9f90654042/dill-0.4.0.tar.gz", hash = "sha256:0633f1d2df477324f53a895b02c901fb961bdbf65a17122586ea7019292cbcf0", size = 186976, upload-time = "2025-04-16T00:41:48.867Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/50/3d/9373ad9c56321fdab5b41197068e1d8c25883b3fea29dd361f9b55116869/dill-0.4.0-py3-none-any.whl", hash = "sha256:44f54bf6412c2c8464c14e8243eb163690a9800dbe2c367330883b19c7561049", size = 119668, upload-time = "2025-04-16T00:41:47.671Z" },
+]
+
+[[package]]
 name = "excog-trajectory"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "dill" },
     { name = "fonttools" },
     { name = "matplotlib" },
     { name = "miceforest" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pandas-stubs" },
+    { name = "plotnine" },
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "seaborn" },
@@ -208,6 +219,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=22.0.0" },
+    { name = "dill", specifier = ">=0.4.0" },
     { name = "fonttools", specifier = "==4.58.4" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.10.0" },
     { name = "matplotlib", specifier = ">=3.4.0" },
@@ -216,6 +228,7 @@ requires-dist = [
     { name = "numpy", specifier = "==2.3.0" },
     { name = "pandas", specifier = "==2.3.0" },
     { name = "pandas-stubs", specifier = "==2.2.3.250527" },
+    { name = "plotnine", specifier = ">=0.14.5" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=3.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.0.100" },
@@ -426,6 +439,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f5/3c/dfd74af1aa573a56fbe54a6a4c524586747ef636ef501295bb1d5bc9935b/miceforest-6.0.3.tar.gz", hash = "sha256:e1f585f8b45332bc6d04ee35a157a3b1b64563e0391171e97fd6a8081968063c", size = 63048, upload-time = "2024-08-02T00:43:50.999Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/45/a2/ea9ff5dcabcb6fef555174761c4acb320af4d9cba9f1ef212a3fc75c39a7/miceforest-6.0.3-py3-none-any.whl", hash = "sha256:a5a176391bda6348f4ebafeb99071989918ddd4a6dff47378aac5e5c36127b9c", size = 40317, upload-time = "2024-08-02T00:43:48.933Z" },
+]
+
+[[package]]
+name = "mizani"
+version = "0.13.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "scipy" },
+    { name = "tzdata", marker = "sys_platform == 'emscripten' or sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/63/11/10c4ce1f442e221586f89fb8a7db80568fadb07d2fd4f1c99e902deab4c2/mizani-0.13.5.tar.gz", hash = "sha256:99c3306fc3217d3840dfd3468feadd9a7664935a07ae4f7e8b3889e46b48ac73", size = 765696, upload-time = "2025-05-02T23:15:23.108Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/21/e7/172f47bc0016f3ea247ad2671ff8d355340f6ae2d0799725a1f3d358daae/mizani-0.13.5-py3-none-any.whl", hash = "sha256:f6024cf3b5780457d7aa56725946857fd9908215efcd5460399d2bc3267ac329", size = 127934, upload-time = "2025-05-02T23:15:21.008Z" },
 ]
 
 [[package]]
@@ -677,6 +705,23 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/fe/8b/3c73abc9c759ecd3f1f7ceff6685840859e8070c4d947c93fae71f6a0bf2/platformdirs-4.3.8.tar.gz", hash = "sha256:3d512d96e16bcb959a814c9f348431070822a6496326a4be0911c40b5a74c2bc", size = 21362, upload-time = "2025-05-07T22:47:42.121Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fe/39/979e8e21520d4e47a0bbe349e2713c0aac6f3d853d0e5b34d76206c439aa/platformdirs-4.3.8-py3-none-any.whl", hash = "sha256:ff7059bb7eb1179e2685604f4aaf157cfd9535242bd23742eadc3c13542139b4", size = 18567, upload-time = "2025-05-07T22:47:40.376Z" },
+]
+
+[[package]]
+name = "plotnine"
+version = "0.14.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "mizani" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "scipy" },
+    { name = "statsmodels" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5d/0e/618bfa724ad19418c83eb22cdc4332dc69bb67f47094bd013ffe15e188d2/plotnine-0.14.5.tar.gz", hash = "sha256:9e75969e8e10d8d770a4be36d10e075cc10b88ca6fcc99e36ada53436fb5653f", size = 6424617, upload-time = "2025-01-02T11:06:07.338Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4d/c5/7cfda7ba9fa02243367fbfb4880b6de8039266f22c47c2dbbd39b6adc46f/plotnine-0.14.5-py3-none-any.whl", hash = "sha256:4a8bc4360732dd69a0263def4abab285ed8f0f4386186f1e44c642f2cea79b88", size = 1301197, upload-time = "2025-01-02T11:06:03.686Z" },
 ]
 
 [[package]]

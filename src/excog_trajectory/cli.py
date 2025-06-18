@@ -121,6 +121,24 @@ def parse_args():
         default=None,
         help="Number of random variables to select for imputation. If not provided, all variables are used.",
     )
+    impute_parser.add_argument(
+        "--save-kernel",
+        type=bool,
+        default=False,
+        help="Whether to save the imputation kernel for future use",
+    )
+    impute_parser.add_argument(
+        "--load-kernel",
+        type=str,
+        default=None,
+        help="Path to load an existing imputation kernel from. If provided, this will skip the imputation step.",
+    )
+    impute_parser.add_argument(
+        "--diagnostic-plots",
+        type=bool,
+        default=False,
+        help="Whether to generate diagnostic plots for the imputation process",
+    )
 
     args = parser.parse_args()
 
@@ -160,7 +178,7 @@ def run_analysis(args):
 
     # Apply QC rules to all variables except cognitive and covariate variables
     print("Applying QC rules to variables...")
-    nhanes_data["main"] = data.apply_qc_rules(nhanes_data["main"], cognitive_vars, covariates, standardize=True)
+    nhanes_data["main"] = data.apply_qc_rules(nhanes_data["main"], cognitive_vars, covariates, standardize=True, log2_transform=True)
 
     # Save the cleaned data
     nhanes_data["main"].to_csv(os.path.join(args.output_data, "cleaned_nhanes.csv"), index=True)
@@ -188,7 +206,7 @@ def run_analysis(args):
     visualization.plot_exposure_correlation_matrix(
         data=nhanes_data["main"],
         description_df=nhanes_data["description"],
-        save_path=args.output_dir,
+        fname=os.path.join(args.output_dir, "exposure_correlation_matrix.png"),
     )
     print(f"Exposure correlation matrix saved to {os.path.join(args.output_dir, 'exposure_correlation_matrix.png')}")
 
@@ -228,6 +246,9 @@ def run_imputation(args):
         random_state=args.random_state,
         n_random_vars=args.n_random_vars,
         n_iterations=args.n_iterations,
+        save_kernel=args.save_kernel,
+        load_kernel=args.load_kernel,
+        diagnostic_plots=args.diagnostic_plots,
     )
 
     # Load the description DataFrame for use with correlation matrices
@@ -241,7 +262,7 @@ def run_imputation(args):
         output_path = "data/processed/"
 
     # Create output directory for correlation matrices if it doesn't exist
-    correlation_output_dir = os.path.join(output_path, "correlation_matrices")
+    correlation_output_dir = "results/correlation_matrices"
     os.makedirs(correlation_output_dir, exist_ok=True)
 
     # Create correlation matrices for each imputed dataset
@@ -261,16 +282,9 @@ def run_imputation(args):
         visualization.plot_exposure_correlation_matrix(
             data=imputed_data,
             description_df=description_df,
-            save_path=correlation_output_dir,
+            fname=os.path.join(correlation_output_dir,f"exposure_correlation_matrix_dataset{dataset_num}.png"),
             dpi=300,
         )
-
-        # Rename the output file to include dataset number
-        original_file = os.path.join(correlation_output_dir, 'exposure_correlation_matrix.png')
-        new_file = os.path.join(correlation_output_dir, f'exposure_correlation_matrix_dataset{dataset_num}.png')
-        if os.path.exists(original_file):
-            os.rename(original_file, new_file)
-            print(f"Correlation matrix saved as {new_file}")
 
 
 def main():
