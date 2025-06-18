@@ -166,7 +166,7 @@ def plot_exposure_correlation_matrix(
     description_df: pd.DataFrame,
     figsize: Tuple[int, int] = (20, 20),
     cmap: str = "seismic",
-    save_path: Optional[str] = None,
+    fname: Optional[str] = None,
     dpi: int = 300,
 ) -> plt.Figure:
     """
@@ -182,8 +182,8 @@ def plot_exposure_correlation_matrix(
         Figure size (width, height) in inches
     cmap : str, default="seismic"
         Colormap to use for the heatmap
-    save_path : str, optional
-        Path to save the figure. If None, the figure is not saved.
+    fname : str, optional
+        File name and path to save the figure. If None, the figure is not saved.
     dpi : int, default=300
         Resolution of the figure in dots per inch
 
@@ -272,8 +272,8 @@ def plot_exposure_correlation_matrix(
     plt.tight_layout()
 
     # Save the figure if a save path is provided
-    if save_path is not None:
-        plt.savefig(os.path.join(save_path, 'exposure_correlation_matrix.png'), bbox_inches='tight', dpi=dpi)
+    if fname is not None:
+        plt.savefig(fname, bbox_inches='tight', dpi=dpi)
         plt.close(fig)
         return None
 

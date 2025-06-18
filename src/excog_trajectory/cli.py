@@ -9,6 +9,7 @@ of cognitive decline in NHANES data and for downloading NHANES data.
 import argparse
 import os
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 from excog_trajectory import data, analysis, visualization
 
@@ -80,6 +81,65 @@ def parse_args():
         help="Name to save the downloaded file as",
     )
 
+    # Parser for the 'impute' command
+    impute_parser = subparsers.add_parser(
+        "impute", help="Impute missing values in NHANES data using MICE"
+    )
+    impute_parser.add_argument(
+        "--data-path",
+        type=str,
+        default="data/processed/cleaned_nhanes.csv",
+        help="Path to the cleaned NHANES dataset",
+    )
+    impute_parser.add_argument(
+        "--output-path",
+        type=str,
+        default=None,
+        help="Path to save the imputed dataset",
+    )
+    impute_parser.add_argument(
+        "--n-imputations",
+        type=int,
+        default=5,
+        help="Number of imputations to perform",
+    )
+    impute_parser.add_argument(
+        "--random-state",
+        type=int,
+        default=42,
+        help="Random state for reproducibility",
+    )
+    impute_parser.add_argument(
+        "--n-iterations",
+        type=int,
+        default=3,
+        help="Number of iterations for the imputation procedure",
+    )
+    impute_parser.add_argument(
+        "--n-random-vars",
+        type=int,
+        default=None,
+        help="Number of random variables to select for imputation. If not provided, all variables are used.",
+    )
+    impute_parser.add_argument(
+        "--save-kernel",
+        type=bool,
+        default=False,
+        help="Whether to save the imputation kernel for future use",
+    )
+    impute_parser.add_argument(
+        "--load-kernel",
+        type=str,
+        default=None,
+        help="Path to load an existing imputation kernel from. If provided, this will skip the imputation step.",
+    )
+    impute_parser.add_argument(
+        "--diagnostic-plots",
+        type=bool,
+        default=False,
+        help="Whether to generate diagnostic plots for the imputation process",
+    )
+
     args = parser.parse_args()
 
     # If no command is specified, show help and exit
@@ -118,7 +178,7 @@ def run_analysis(args):
 
     # Apply QC rules to all variables except cognitive and covariate variables
     print("Applying QC rules to variables...")
-    nhanes_data["main"] = data.apply_qc_rules(nhanes_data["main"], cognitive_vars, covariates)
+    nhanes_data["main"] = data.apply_qc_rules(nhanes_data["main"], cognitive_vars, covariates, standardize=True, log2_transform=True)
 
     # Save the cleaned data
     nhanes_data["main"].to_csv(os.path.join(args.output_data, "cleaned_nhanes.csv"), index=True)
@@ -146,7 +206,7 @@ def run_analysis(args):
     visualization.plot_exposure_correlation_matrix(
         data=nhanes_data["main"],
         description_df=nhanes_data["description"],
-        save_path=args.output_dir,
+        fname=os.path.join(args.output_dir, "exposure_correlation_matrix.png"),
     )
     print(f"Exposure correlation matrix saved to {os.path.join(args.output_dir, 'exposure_correlation_matrix.png')}")
 
@@ -173,6 +233,60 @@ def run_download(args):
     print(f"Total files extracted: {len(extracted_files)}")
 
 
+def run_imputation(args):
+    """Run the imputation procedure."""
+
+    print(f"Running imputation procedure...")
+
+    # Call the impute_exposure_variables function
+    kernel = data.impute_exposure_variables(
+        data_path=args.data_path,
+        output_path=args.output_path,
+        n_imputations=args.n_imputations,
+        random_state=args.random_state,
+        n_random_vars=args.n_random_vars,
+        n_iterations=args.n_iterations,
+        save_kernel=args.save_kernel,
+        load_kernel=args.load_kernel,
+        diagnostic_plots=args.diagnostic_plots,
+    )
+
+    # Load the description DataFrame for use with correlation matrices
+    print("Loading variable descriptions for correlation matrices...")
+    nhanes_data = data.load_nhanes_data()
+    description_df = nhanes_data["description"]
+
+    # Set default output path if none is provided
+    output_path = args.output_path
+    if output_path is None:
+        output_path = "data/processed/"
+
+    # Create output directory for correlation matrices if it doesn't exist
+    correlation_output_dir = "results/correlation_matrices"
+    os.makedirs(correlation_output_dir, exist_ok=True)
+
+    # Create correlation matrices for each imputed dataset
+    print(f"Creating correlation matrices for each imputed dataset...")
+    for i in range(args.n_imputations):
+        dataset_num = i + 1
+        filename = f"imputed_nhanes_dat{dataset_num}.csv"
+        filepath = os.path.join(output_path, filename)
+
+        print(f"Processing imputed dataset {dataset_num}...")
+
+        # Load the imputed dataset
+        imputed_data = pd.read_csv(filepath)
+
+        # Create correlation matrix
+        print(f"Creating correlation matrix for dataset {dataset_num}...")
+        visualization.plot_exposure_correlation_matrix(
+            data=imputed_data,
+            description_df=description_df,
+            fname=os.path.join(correlation_output_dir,f"exposure_correlation_matrix_dataset{dataset_num}.png"),
+            dpi=300,
+        )
+
+
 def main():
     """Main entry point for the CLI."""
     args = parse_args()
@@ -182,6 +296,8 @@ def main():
         run_analysis(args)
     elif args.command == "download":
         run_download(args)
+    elif args.command == "impute":
+        run_imputation(args)
     else:
         print(f"Unknown command: {args.command}")
         exit(1)

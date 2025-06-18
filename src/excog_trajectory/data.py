@@ -10,8 +10,11 @@ import urllib.request
 import pandas as pd
 import zipfile
 import shutil
+import dill
 import numpy as np
+import miceforest as mf
 from typing import Dict, List, Optional, Union, Tuple, Set
+from sklearn.preprocessing import StandardScaler
 
 
 def load_nhanes_data(
@@ -380,7 +383,9 @@ def download_nhanes_data(
 def apply_qc_rules(
     data: pd.DataFrame,
     cognitive_vars: List[str],
-    covariates: List[str]
+    covariates: List[str],
+    standardize: bool = False,
+    log2_transform: bool = False,
 ) -> pd.DataFrame:
     """
     Apply quality control rules to the NHANES dataset.
@@ -402,6 +407,10 @@ def apply_qc_rules(
         List of cognitive variables to exclude from QC rules
     covariates : List[str]
         List of covariate variables to exclude from QC rules
+    standardize : bool
+        Whether to standardize the data after applying QC rules, by default False
+    log2_transform : bool
+        Whether to apply log2 transformation to the data after applying QC rules, by default False
 
     Returns
     -------
@@ -520,6 +529,19 @@ def apply_qc_rules(
     ordered_vars.extend(covariates)
     ordered_vars.extend(cognitive_vars)
 
+    if log2_transform:
+        print("Applying log2 transformation to data...")
+        # Apply log2 transformation to the data
+        eps = 1e-10  # Small value to avoid log2(0)
+        data_qc[vars_passing_qc] = np.log2(data_qc[vars_passing_qc] + eps)
+
+    # Normalize the data if specified
+    if standardize:
+        print("Standardizing data by subtracting mean and dividing by standard deviation...")
+        # Normalize the data by subtracting the mean and dividing by the standard deviation
+        scaler = StandardScaler().fit(data_qc[vars_passing_qc])
+        data_qc[vars_passing_qc] = scaler.transform(data_qc[vars_passing_qc])
+
     # Use filter_variables to get the final dataset with both the passing QC variables and the excluded variables
     result = filter_variables(data_qc, vars_passing_qc, ordered_vars)
 
@@ -586,3 +608,187 @@ def extract_nhanes_data(
             print(f"Cleaned up temporary directory: {temp_dir}")
 
     return output_dir, extracted_files
+
+
+def identify_variable_types(data: pd.DataFrame) -> Dict[str, str]:
+    """
+    Identify the type of each variable in the DataFrame (continuous or categorical).
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing the variables to identify
+
+    Returns
+    -------
+    Dict[str, str]
+        Dictionary mapping variable names to their types ('continuous' or 'categorical')
+    """
+    var_types = {}
+
+    for col in data.columns:
+        # Skip columns with all NaN values
+        if data[col].isna().all():
+            continue
+
+        # Get non-NaN values
+        non_nan_values = data[col].dropna()
+
+        # Check if the variable is numeric
+        if pd.api.types.is_numeric_dtype(non_nan_values):
+            # Check if the variable is categorical (has fewer than 10 unique values)
+            unique_values = non_nan_values.unique()
+            if len(unique_values) < 10:
+                var_types[col] = 'categorical'
+            else:
+                var_types[col] = 'continuous'
+        else:
+            # Non-numeric variables are considered categorical
+            var_types[col] = 'categorical'
+
+    return var_types
+
+
+def impute_exposure_variables(
+    data_path: str = "data/processed/cleaned_nhanes.csv",
+    output_path: Optional[str] = None,
+    n_imputations: int = 5,
+    random_state: int = 42,
+    n_random_vars: Optional[int] = None,
+    n_iterations: int = 3,
+    tune_parameters: bool = True,
+    save_kernel: bool = False,
+    load_kernel: Optional[str] = None,
+    diagnostic_plots: bool = False,
+) -> mf.ImputationKernel:
+    """
+    Impute missing values in exposure variables using Multiple Imputation by Chained Equations (MICE)
+    with miceforest.
+
+    This function:
+    1. Loads the cleaned NHANES dataset
+    2. Implements MICE imputation using miceforest
+    3. Generates multiple imputed datasets
+    4. Saves the imputed datasets with appropriate names
+
+    Parameters
+    ----------
+    data_path : str, optional
+        Path to the cleaned NHANES dataset, by default "data/processed/cleaned_nhanes.csv"
+    output_path : Optional[str], optional
+        Path to save the imputed datasets, by default None
+    n_imputations : int, optional
+        Number of imputed datasets to generate, by default 5
+    random_state : int, optional
+        Random state for reproducibility, by default 42
+    n_random_vars : Optional[int], optional
+        Number of random variables to select for imputation. If None, all variables are used, by default None
+    n_iterations : int, optional
+        Number of iterations for the imputation procedure, by default 3
+    tune_parameters : bool
+        Whether to tune the imputation parameters using gradient boosting decision trees (GBDT), by default True.
+    save_kernel: bool
+        Whether to save the ImputationKernel object after imputation, by default False.
+    load_kernel: Optional[str]
+        Path to load an existing ImputationKernel object. If provided, this will skip the imputation step.
+    diagnostic_plots: bool
+        Whether to generate diagnostic plots during the imputation process, by default False.
+
+    Returns
+    -------
+    ImputationKernel
+    """
+    if output_path is None:
+        output_path = "data/processed/"
+
+    if load_kernel:
+        # Load the existing ImputationKernel object
+        print(f"Loading ImputationKernel from {load_kernel}...")
+        with open(load_kernel, "rb") as f:
+            kernel = dill.load(f)
+        print("ImputationKernel loaded successfully.")
+    elif load_kernel is None:
+        # Load the cleaned NHANES dataset
+        print(f"Loading cleaned NHANES data from {data_path}...")
+        data = pd.read_csv(data_path, index_col=0).reset_index()
+
+        demographic_vars = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic",
+                            "other_eth", "SES_LEVEL", "education", "SDDSRVYR", "CFDRIGHT"]
+        exposure_vars = [col for col in data.columns if col not in demographic_vars]
+
+        print(f"Identified {len(exposure_vars)} exposure variables")
+
+        # Randomly select a subset of variables if n_random_vars is provided
+        if n_random_vars is not None and n_random_vars < len(exposure_vars):
+            # Set random seed for reproducibility
+            np.random.seed(random_state)
+            # Randomly select n_random_vars variables
+            exposure_vars = np.random.choice(exposure_vars, size=n_random_vars, replace=False).tolist()
+            print(f"Randomly selected {len(exposure_vars)} variables for imputation")
+
+        # Create a copy of the data for imputation
+        to_impute = data.loc[:, demographic_vars + exposure_vars].copy()
+
+        # Create a dataset for miceforest
+        print("Creating miceforest kernel...")
+
+        # Create the kernel
+        kernel = mf.ImputationKernel(
+            data=to_impute,
+            save_all_iterations_data=True,
+            random_state=random_state,
+            num_datasets=n_imputations,
+        )
+
+        if tune_parameters:
+            print(f"Running parameter tunning...")
+            optimal_parameters = kernel.tune_parameters(use_gbdt=True)
+            print(f"Running imputation with {n_iterations} iterations...")
+            kernel.mice(n_iterations, variable_parameters=optimal_parameters)
+        elif tune_parameters is False:
+            print(f"Running imputation with {n_iterations} iterations...")
+            kernel.mice(n_iterations)
+        else:
+            raise ValueError("tune_parameters must be True or False")
+
+        # Create output directory if it doesn't exist
+        if output_path:
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            # Save the kernel if specified
+        if save_kernel:
+            kernel_path = output_path + "imputation_kernel.pkl" if output_path else "imputation_kernel.pkl"
+            print(f"Saving ImputationKernel to {kernel_path}...")
+            with open(kernel_path, "wb") as f:
+                dill.dump(kernel, f)
+    else:
+        raise ValueError("Either load_kernel must be provided or the imputation should be performed from scratch.")
+
+    # Generate and save the imputed datasets
+    print(f"Generating {n_imputations} imputed datasets...")
+
+    if n_imputations != kernel.num_datasets:
+        print(f"Warning: n_imputations ({n_imputations}) does not match the number of datasets in the kernel ({kernel.num_datasets})."
+              f"Using the number of datasets in the kernel ({kernel.num_datasets}) instead.")
+        n_imputations = kernel.num_datasets
+
+    for i in range(n_imputations):
+        # Get the imputed dataset
+        dataset_num = i + 1
+        imputed_dataset = kernel.complete_data(dataset=i)
+
+        # Save the dataset with appropriate name
+        filename = "imputed_nhanes_dat" + str(dataset_num) + ".csv"
+        print(f"Saving imputed dataset {filename} to {output_path}...")
+        imputed_dataset.to_csv(output_path + filename, index=False)
+
+    print("Imputation complete!")
+
+    if diagnostic_plots:
+        print("Generating diagnostic plots...")
+        distributions = kernel.plot_imputed_distributions()
+        distributions.save("results/distributions_mice.png", dpi=300, width=20, height=20)
+        if kernel.save_all_iterations_data:
+            importance = kernel.plot_feature_importance(kernel.num_datasets - 1)
+            importance.save("results/feature_importance_mice.png", dpi=300, width=60, height=60, limitsize=False)
+
+    return kernel
