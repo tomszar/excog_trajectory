@@ -8,10 +8,10 @@ of cognitive decline in NHANES data and for downloading NHANES data.
 
 import argparse
 import os
+
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from excog_trajectory import data, analysis, visualization
+
+from excog_trajectory import data, visualization
 
 
 def parse_args():
@@ -161,7 +161,8 @@ def run_analysis(args):
 
     # Define variables for analysis
     cognitive_vars = ["CFDRIGHT"]  # Cognitive function right responses
-    covariates = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic", "other_eth", "SES_LEVEL", "education", "SDDSRVYR"]  # Demographics and survey cycle]  # Demographics
+    covariates = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic", "other_eth", "SES_LEVEL",
+                  "education", "SDDSRVYR"]  # Demographics and survey cycle]  # Demographics
 
     # Keep only relevant columns in the main DataFrame
     print("Filtering NHANES data to keep only relevant columns...")
@@ -178,7 +179,8 @@ def run_analysis(args):
 
     # Apply QC rules to all variables except cognitive and covariate variables
     print("Applying QC rules to variables...")
-    nhanes_data["main"] = data.apply_qc_rules(nhanes_data["main"], cognitive_vars, covariates, standardize=True, log2_transform=True)
+    nhanes_data["main"] = data.apply_qc_rules(nhanes_data["main"], cognitive_vars, covariates, standardize=True,
+                                              log2_transform=True)
 
     # Save the cleaned data
     nhanes_data["main"].to_csv(os.path.join(args.output_data, "cleaned_nhanes.csv"), index=True)
@@ -282,7 +284,7 @@ def run_imputation(args):
         visualization.plot_exposure_correlation_matrix(
             data=imputed_data,
             description_df=description_df,
-            fname=os.path.join(correlation_output_dir,f"exposure_correlation_matrix_dataset{dataset_num}.png"),
+            fname=os.path.join(correlation_output_dir, f"exposure_correlation_matrix_dataset{dataset_num}.png"),
             dpi=300,
         )
 

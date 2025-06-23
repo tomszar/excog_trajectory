@@ -5,22 +5,21 @@ This module provides functions for creating visualizations of NHANES data,
 exposure-outcome relationships, and analysis results.
 """
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
-import numpy as np
-import os
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
 from matplotlib.figure import Figure
 
 
 def plot_distributions(
-    data: pd.DataFrame,
-    vars: List[str],
-    n_cols: int = 3,
-    figsize: Tuple[int, int] = (15, 10),
-    save_path: Optional[str] = None,
+        data: pd.DataFrame,
+        vars: List[str],
+        n_cols: int = 3,
+        figsize: Tuple[int, int] = (15, 10),
+        save_path: Optional[str] = None,
 ) -> Figure | None:
     """
     Create histograms or density plots of variable distributions.
@@ -54,12 +53,12 @@ def plot_distributions(
 
 
 def plot_exposure_outcome_relationships(
-    data: pd.DataFrame,
-    outcome_var: str,
-    exposure_vars: List[str],
-    n_cols: int = 3,
-    figsize: Tuple[int, int] = (15, 10),
-    save_path: Optional[str] = None,
+        data: pd.DataFrame,
+        outcome_var: str,
+        exposure_vars: List[str],
+        n_cols: int = 3,
+        figsize: Tuple[int, int] = (15, 10),
+        save_path: Optional[str] = None,
 ) -> plt.Figure:
     """
     Create scatter plots of relationships between exposures and cognitive outcomes.
@@ -90,10 +89,10 @@ def plot_exposure_outcome_relationships(
 
 
 def plot_model_coefficients(
-    model_results: Dict[str, Dict[str, object]],
-    exposure_vars: List[str],
-    figsize: Tuple[int, int] = (12, 8),
-    save_path: Optional[str] = None,
+        model_results: Dict[str, Dict[str, object]],
+        exposure_vars: List[str],
+        figsize: Tuple[int, int] = (12, 8),
+        save_path: Optional[str] = None,
 ) -> plt.Figure:
     """
     Create forest plots of model coefficients for exposure variables.
@@ -120,14 +119,14 @@ def plot_model_coefficients(
 
 
 def plot_trajectory_curves(
-    longitudinal_results: Dict[str, object],
-    data: pd.DataFrame,
-    time_var: str,
-    outcome_var: str,
-    exposure_var: str,
-    exposure_levels: List[float],
-    figsize: Tuple[int, int] = (10, 6),
-    save_path: Optional[str] = None,
+        longitudinal_results: Dict[str, object],
+        data: pd.DataFrame,
+        time_var: str,
+        outcome_var: str,
+        exposure_var: str,
+        exposure_levels: List[float],
+        figsize: Tuple[int, int] = (10, 6),
+        save_path: Optional[str] = None,
 ) -> plt.Figure:
     """
     Plot predicted cognitive trajectories at different exposure levels.
@@ -162,12 +161,12 @@ def plot_trajectory_curves(
 
 
 def plot_exposure_correlation_matrix(
-    data: pd.DataFrame,
-    description_df: pd.DataFrame,
-    figsize: Tuple[int, int] = (20, 20),
-    cmap: str = "seismic",
-    fname: Optional[str] = None,
-    dpi: int = 300,
+        data: pd.DataFrame,
+        description_df: pd.DataFrame,
+        figsize: Tuple[int, int] = (20, 20),
+        cmap: str = "seismic",
+        fname: Optional[str] = None,
+        dpi: int = 300,
 ) -> plt.Figure:
     """
     Create a correlation matrix between all exposure variables, ordered by category.
@@ -193,8 +192,8 @@ def plot_exposure_correlation_matrix(
         The created figure object
     """
     # Get all exposure variables from the data
-    exposure_vars = [col for col in data.columns 
-                    if col in description_df['var'].values]
+    exposure_vars = [col for col in data.columns
+                     if col in description_df['var'].values]
 
     if not exposure_vars:
         print("No exposure variables found in the data")
@@ -218,7 +217,7 @@ def plot_exposure_correlation_matrix(
 
     # Create a DataFrame with variable names and categories
     var_info = pd.DataFrame({
-        'var': list(var_categories.keys()),
+        'var'     : list(var_categories.keys()),
         'category': list(var_categories.values())
     })
 

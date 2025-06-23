@@ -6,20 +6,21 @@ NHANES data related to cognitive assessments and environmental exposures.
 """
 
 import os
-import urllib.request
-import pandas as pd
-import zipfile
 import shutil
+import urllib.request
+import zipfile
+from typing import Dict, List, Optional, Tuple, Union
+
 import dill
-import numpy as np
 import miceforest as mf
-from typing import Dict, List, Optional, Union, Tuple, Set
+import numpy as np
+import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
 
 def load_nhanes_data(
-    data_path: Optional[str] = None,
-    file_names: Optional[List[str]] = None,
+        data_path: Optional[str] = None,
+        file_names: Optional[List[str]] = None,
 ) -> Dict[str, pd.DataFrame]:
     """
     Load NHANES data for specified survey cycle(s).
@@ -164,8 +165,8 @@ def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
 
             # Add the result to our list
             results.append({
-                'survey_year': year,
-                'column_name': col,
+                'survey_year'       : year,
+                'column_name'       : col,
                 'percentage_missing': missing_percentage
             })
 
@@ -190,7 +191,8 @@ def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
     return wide_df
 
 
-def filter_variables(data: pd.DataFrame, vars_to_filter: List[str], vars_to_keep: Optional[List[str]] = None) -> pd.DataFrame:
+def filter_variables(data: pd.DataFrame, vars_to_filter: List[str],
+                     vars_to_keep: Optional[List[str]] = None) -> pd.DataFrame:
     """
     Filter a DataFrame to include only specified variables, while optionally retaining others.
     Variables in vars_to_keep will appear at the beginning of the returned DataFrame.
@@ -230,7 +232,8 @@ def filter_variables(data: pd.DataFrame, vars_to_filter: List[str], vars_to_keep
     return data[vars_list].copy()
 
 
-def filter_exposure_variables(nhanes_data: Dict[str, pd.DataFrame], vars_to_keep: Optional[List[str]] = None) -> pd.DataFrame:
+def filter_exposure_variables(nhanes_data: Dict[str, pd.DataFrame],
+                              vars_to_keep: Optional[List[str]] = None) -> pd.DataFrame:
     """
     Filter variables from nhanes_data["main"] that belong to specific exposure categories.
 
@@ -265,40 +268,40 @@ def filter_exposure_variables(nhanes_data: Dict[str, pd.DataFrame], vars_to_keep
         raise KeyError("nhanes_data['description'] must contain 'var' and 'category' columns")
 
     # List of exposure categories to retain
-    exposure_categories = [# "alcohol use",
-                           # "bacterial infection",
-                           "cotinine",
-                           "diakyl",
-                           "dioxins",
-                           # "food component recall",
-                           "furans",
-                           "heavy metals",
-                           # "housing",
-                           "hydrocarbons",
-                           "nutrients",
-                           # "occupation",
-                           "pcbs",
-                           "perchlorate",
-                           "pesticides",
-                           "phenols",
-                           "phthalates",
-                           "phytoestrogens",
-                           "polybrominated ethers",
-                           "polyflourochemicals",
-                           # "sexual behavior",
-                           # "smoking behavior",
-                           # "smoking family",
-                           # "social support",
-                           # "street drug",
-                           # "sun exposure",
-                           # "supplement use",
-                           # "viral infection",
-                           "volatile compounds"]
+    exposure_categories = [  # "alcohol use",
+        # "bacterial infection",
+        "cotinine",
+        "diakyl",
+        "dioxins",
+        # "food component recall",
+        "furans",
+        "heavy metals",
+        # "housing",
+        "hydrocarbons",
+        "nutrients",
+        # "occupation",
+        "pcbs",
+        "perchlorate",
+        "pesticides",
+        "phenols",
+        "phthalates",
+        "phytoestrogens",
+        "polybrominated ethers",
+        "polyflourochemicals",
+        # "sexual behavior",
+        # "smoking behavior",
+        # "smoking family",
+        # "social support",
+        # "street drug",
+        # "sun exposure",
+        # "supplement use",
+        # "viral infection",
+        "volatile compounds"]
 
     # Filter variables that belong to the specified exposure categories
     exposure_vars = list(set(nhanes_data["description"][
-        nhanes_data["description"]["category"].isin(exposure_categories)
-    ]["var"]))
+                                 nhanes_data["description"]["category"].isin(exposure_categories)
+                             ]["var"]))
 
     # Use the filter_variables function to filter the data
     filtered_data = filter_variables(nhanes_data["main"], exposure_vars, vars_to_keep)
@@ -308,8 +311,8 @@ def filter_exposure_variables(nhanes_data: Dict[str, pd.DataFrame], vars_to_keep
         return pd.DataFrame()
 
     # Count the number of exposure variables (excluding vars_to_keep)
-    exposure_vars_count = len([var for var in filtered_data.columns 
-                              if vars_to_keep is None or var not in vars_to_keep])
+    exposure_vars_count = len([var for var in filtered_data.columns
+                               if vars_to_keep is None or var not in vars_to_keep])
 
     print(f"Filtered {exposure_vars_count} exposure variables from {len(exposure_categories)} categories")
     if vars_to_keep:
@@ -320,10 +323,10 @@ def filter_exposure_variables(nhanes_data: Dict[str, pd.DataFrame], vars_to_keep
 
 
 def download_nhanes_data(
-    output_dir: str = "data/raw",
-    id: str = "70319",
-    filename: str = "nhanes_data.zip",
-    direct_url: str = None
+        output_dir: str = "data/raw",
+        id: str = "70319",
+        filename: str = "nhanes_data.zip",
+        direct_url: str = None
 ) -> str:
     """
     Download NHANES data from Data Dryad using the API or a direct URL and save it to the output directory.
@@ -381,11 +384,11 @@ def download_nhanes_data(
 
 
 def apply_qc_rules(
-    data: pd.DataFrame,
-    cognitive_vars: List[str],
-    covariates: List[str],
-    standardize: bool = False,
-    log2_transform: bool = False,
+        data: pd.DataFrame,
+        cognitive_vars: List[str],
+        covariates: List[str],
+        standardize: bool = False,
+        log2_transform: bool = False,
 ) -> pd.DataFrame:
     """
     Apply quality control rules to the NHANES dataset.
@@ -519,7 +522,8 @@ def apply_qc_rules(
     print(f"QC Rule 2: Removed {len(removed_vars_rule2)} categorical variables with less than 200 values in a category")
     print(f"QC Rule 3: Removed {len(removed_vars_rule3)} variables with 90% of non-NaN values equal to zero")
     print(f"QC Rule 4: Removed {len(removed_vars_rule4)} variables with 100% missing data in at least one survey year")
-    print(f"Total variables removed: {len(removed_vars_rule1) + len(removed_vars_rule2) + len(removed_vars_rule3) + len(removed_vars_rule4)}")
+    print(
+        f"Total variables removed: {len(removed_vars_rule1) + len(removed_vars_rule2) + len(removed_vars_rule3) + len(removed_vars_rule4)}")
     print(f"Variables remaining: {len(vars_passing_qc) + len(excluded_vars)} out of {len(all_vars)}")
 
     # Use the filter_variables function to get the final dataset
@@ -549,8 +553,8 @@ def apply_qc_rules(
 
 
 def extract_nhanes_data(
-    zip_path: str,
-    output_dir: str = "data/raw"
+        zip_path: str,
+        output_dir: str = "data/raw"
 ) -> Tuple[str, List[str]]:
     """
     Extract NHANES data from a zip file and move the contents to the output directory.
@@ -650,16 +654,16 @@ def identify_variable_types(data: pd.DataFrame) -> Dict[str, str]:
 
 
 def impute_exposure_variables(
-    data_path: str = "data/processed/cleaned_nhanes.csv",
-    output_path: Optional[str] = None,
-    n_imputations: int = 5,
-    random_state: int = 42,
-    n_random_vars: Optional[int] = None,
-    n_iterations: int = 3,
-    tune_parameters: bool = True,
-    save_kernel: bool = False,
-    load_kernel: Optional[str] = None,
-    diagnostic_plots: bool = False,
+        data_path: str = "data/processed/cleaned_nhanes.csv",
+        output_path: Optional[str] = None,
+        n_imputations: int = 5,
+        random_state: int = 42,
+        n_random_vars: Optional[int] = None,
+        n_iterations: int = 3,
+        tune_parameters: bool = True,
+        save_kernel: bool = False,
+        load_kernel: Optional[str] = None,
+        diagnostic_plots: bool = False,
 ) -> mf.ImputationKernel:
     """
     Impute missing values in exposure variables using Multiple Imputation by Chained Equations (MICE)
@@ -767,8 +771,9 @@ def impute_exposure_variables(
     print(f"Generating {n_imputations} imputed datasets...")
 
     if n_imputations != kernel.num_datasets:
-        print(f"Warning: n_imputations ({n_imputations}) does not match the number of datasets in the kernel ({kernel.num_datasets})."
-              f"Using the number of datasets in the kernel ({kernel.num_datasets}) instead.")
+        print(
+            f"Warning: n_imputations ({n_imputations}) does not match the number of datasets in the kernel ({kernel.num_datasets})."
+            f"Using the number of datasets in the kernel ({kernel.num_datasets}) instead.")
         n_imputations = kernel.num_datasets
 
     for i in range(n_imputations):

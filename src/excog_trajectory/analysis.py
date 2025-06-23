@@ -5,20 +5,17 @@ This module provides statistical methods and modeling approaches for analyzing
 the associations between environmental exposures and cognitive outcomes in NHANES data.
 """
 
-import numpy as np
+from typing import Dict, List, Optional
+
 import pandas as pd
-from typing import Dict, List, Optional, Tuple, Union
-import statsmodels.api as sm
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
 
 
 def run_linear_models(
-    data: pd.DataFrame,
-    outcome_vars: List[str],
-    exposure_vars: List[str],
-    covariates: Optional[List[str]] = None,
-    survey_design: Optional[object] = None,
+        data: pd.DataFrame,
+        outcome_vars: List[str],
+        exposure_vars: List[str],
+        covariates: Optional[List[str]] = None,
+        survey_design: Optional[object] = None,
 ) -> Dict[str, Dict[str, object]]:
     """
     Run linear regression models to assess relationships between exposures and cognitive outcomes.
@@ -46,12 +43,12 @@ def run_linear_models(
 
 
 def run_longitudinal_analysis(
-    data: pd.DataFrame,
-    outcome_var: str,
-    exposure_vars: List[str],
-    time_var: str,
-    id_var: str,
-    covariates: Optional[List[str]] = None,
+        data: pd.DataFrame,
+        outcome_var: str,
+        exposure_vars: List[str],
+        time_var: str,
+        id_var: str,
+        covariates: Optional[List[str]] = None,
 ) -> Dict[str, object]:
     """
     Run longitudinal analysis to assess exposure effects on cognitive trajectories.
@@ -81,11 +78,11 @@ def run_longitudinal_analysis(
 
 
 def run_mixture_analysis(
-    data: pd.DataFrame,
-    outcome_vars: List[str],
-    exposure_vars: List[str],
-    covariates: Optional[List[str]] = None,
-    n_components: int = 3,
+        data: pd.DataFrame,
+        outcome_vars: List[str],
+        exposure_vars: List[str],
+        covariates: Optional[List[str]] = None,
+        n_components: int = 3,
 ) -> Dict[str, object]:
     """
     Run mixture modeling to identify patterns of exposures related to cognitive outcomes.
@@ -113,9 +110,9 @@ def run_mixture_analysis(
 
 
 def calculate_exposure_indices(
-    data: pd.DataFrame,
-    exposure_vars: List[str],
-    method: str = "sum",
+        data: pd.DataFrame,
+        exposure_vars: List[str],
+        method: str = "sum",
 ) -> pd.DataFrame:
     """
     Calculate composite exposure indices from multiple exposure variables.
