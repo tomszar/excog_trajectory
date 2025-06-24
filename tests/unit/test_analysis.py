@@ -6,6 +6,7 @@ import pytest
 import pandas as pd
 import numpy as np
 from excog_trajectory import analysis
+from sklearn.preprocessing import StandardScaler
 
 
 def test_run_linear_models():
@@ -97,12 +98,116 @@ def test_calculate_exposure_indices():
 
     # Check that the result is a DataFrame
     assert isinstance(result, pd.DataFrame)
-    
+
     # Check that the result contains the original data
     assert len(result) == len(test_data)
     assert "exposure1" in result.columns
     assert "exposure2" in result.columns
     assert "other_col" in result.columns
-    
+
     # Check that the original DataFrame was not modified
     assert id(result) != id(test_data)
+
+
+def test_run_plsr():
+    """Test that run_plsr returns a dictionary with the expected keys and shapes."""
+    # Create a mock DataFrame
+    test_data = pd.DataFrame({
+        "exposure1": [0.1, 0.2, 0.3, 0.4, 0.5],
+        "exposure2": [1.0, 2.0, 3.0, 4.0, 5.0],
+        "cognitive1": [10, 20, 30, 40, 50],
+        "covariate1": [100, 200, 300, 400, 500],
+        "covariate2": [1000, 2000, 3000, 4000, 5000]
+    })
+
+    # Call the function
+    result = analysis.run_plsr(
+        data=test_data,
+        exposure_vars=["exposure1", "exposure2"],
+        cognitive_vars=["cognitive1"],
+        covariates=["covariate1", "covariate2"],
+        n_components=2,
+        scale=True
+    )
+
+    # Check that the result is a dictionary
+    assert isinstance(result, dict)
+
+    # Check that the result contains the expected keys
+    expected_keys = [
+        "model", "X_loadings", "Y_loadings", "X_scores", "Y_scores",
+        "X_explained_variance", "Y_explained_variance", "X_vars",
+        "Y_vars", "n_components", "X_scaler", "Y_scaler"
+    ]
+    for key in expected_keys:
+        assert key in result
+
+    # Check that the shapes of the results are correct
+    assert result["X_loadings"].shape == (4, 2)  # 2 exposure vars + 2 covariates, 2 components
+    assert result["Y_loadings"].shape == (1, 2)  # 1 cognitive var, 2 components
+    assert result["X_scores"].shape == (5, 2)    # 5 samples, 2 components
+    assert result["Y_scores"].shape == (5, 2)    # 5 samples, 2 components
+
+    # Check that the explained variance is positive
+    assert np.all(result["X_explained_variance"] > 0)
+    assert np.all(result["Y_explained_variance"] > 0)
+
+
+def test_run_snf():
+    """Test that run_snf returns a dictionary with the expected keys and shapes."""
+    # Create a mock DataFrame
+    test_data = pd.DataFrame({
+        "exposure1": [0.1, 0.2, 0.3, 0.4, 0.5],
+        "exposure2": [1.0, 2.0, 3.0, 4.0, 5.0],
+        "exposure3": [10, 20, 30, 40, 50],
+        "exposure4": [100, 200, 300, 400, 500],
+        "cognitive1": [1000, 2000, 3000, 4000, 5000],
+        "covariate1": [10000, 20000, 30000, 40000, 50000],
+        "covariate2": [100000, 200000, 300000, 400000, 500000]
+    })
+
+    # Define exposure categories
+    exposure_categories = {
+        "category1": ["exposure1", "exposure2"],
+        "category2": ["exposure3", "exposure4"]
+    }
+
+    # Call the function
+    result = analysis.run_snf(
+        data=test_data,
+        exposure_categories=exposure_categories,
+        cognitive_vars=["cognitive1"],
+        covariates=["covariate1", "covariate2"],
+        k=2,  # Small k for test
+        t=2,  # Small t for test
+        alpha=0.5,
+        scale=True
+    )
+
+    # Check that the result is a dictionary
+    assert isinstance(result, dict)
+
+    # Check that the result contains the expected keys
+    expected_keys = [
+        "fused_matrix", "similarity_matrices", "normalized_matrices",
+        "k_nearest_matrices", "exposure_categories", "cognitive_vars",
+        "covariates", "parameters"
+    ]
+    for key in expected_keys:
+        assert key in result
+
+    # Check that the shapes of the results are correct
+    n_samples = len(test_data)
+    assert result["fused_matrix"].shape == (n_samples, n_samples)
+
+    # Check that the similarity matrices have the expected keys
+    expected_similarity_keys = ["category1", "category2", "cognitive", "covariates"]
+    for key in expected_similarity_keys:
+        assert key in result["similarity_matrices"]
+        assert result["similarity_matrices"][key].shape == (n_samples, n_samples)
+
+    # Check that the fused matrix is symmetric
+    assert np.allclose(result["fused_matrix"], result["fused_matrix"].T)
+
+    # Check that the diagonal of the fused matrix is zero
+    assert np.allclose(np.diag(result["fused_matrix"]), 0)

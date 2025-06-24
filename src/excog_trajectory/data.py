@@ -716,9 +716,16 @@ def impute_exposure_variables(
         print(f"Loading cleaned NHANES data from {data_path}...")
         data = pd.read_csv(data_path, index_col=0).reset_index()
 
+        # Store SEQN separately if it exists in the data
+        seqn_data = None
+        if 'SEQN' in data.columns:
+            seqn_data = data['SEQN'].copy()
+            print("SEQN column found and will be preserved but not used in imputation")
+
         demographic_vars = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic",
                             "other_eth", "SES_LEVEL", "education", "SDDSRVYR", "CFDRIGHT"]
-        exposure_vars = [col for col in data.columns if col not in demographic_vars]
+        # Exclude SEQN from exposure variables
+        exposure_vars = [col for col in data.columns if col not in demographic_vars and col != 'SEQN']
 
         print(f"Identified {len(exposure_vars)} exposure variables")
 
@@ -730,7 +737,7 @@ def impute_exposure_variables(
             exposure_vars = np.random.choice(exposure_vars, size=n_random_vars, replace=False).tolist()
             print(f"Randomly selected {len(exposure_vars)} variables for imputation")
 
-        # Create a copy of the data for imputation
+        # Create a copy of the data for imputation, excluding SEQN
         to_impute = data.loc[:, demographic_vars + exposure_vars].copy()
 
         # Create a dataset for miceforest
@@ -780,6 +787,13 @@ def impute_exposure_variables(
         # Get the imputed dataset
         dataset_num = i + 1
         imputed_dataset = kernel.complete_data(dataset=i)
+
+        # Add SEQN back to the imputed dataset if it was stored
+        if seqn_data is not None:
+            imputed_dataset['SEQN'] = seqn_data.values
+            # Reorder columns to put SEQN first
+            cols = ['SEQN'] + [col for col in imputed_dataset.columns if col != 'SEQN']
+            imputed_dataset = imputed_dataset[cols]
 
         # Save the dataset with appropriate name
         filename = "imputed_nhanes_dat" + str(dataset_num) + ".csv"
