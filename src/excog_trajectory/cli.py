@@ -45,16 +45,34 @@ def parse_args():
         help="Directory to save PLSR results",
     )
     plsr_parser.add_argument(
-        "--n-components",
-        type=int,
-        default=2,
-        help="Number of components to use in the PLSR model",
-    )
-    plsr_parser.add_argument(
         "--scale",
         type=bool,
         default=True,
         help="Whether to standardize the data before running PLSR",
+    )
+    plsr_parser.add_argument(
+        "--outer-folds",
+        type=int,
+        default=8,
+        help="Number of folds for the outer cross-validation loop",
+    )
+    plsr_parser.add_argument(
+        "--inner-folds",
+        type=int,
+        default=7,
+        help="Number of folds for the inner cross-validation loop",
+    )
+    plsr_parser.add_argument(
+        "--max-components",
+        type=int,
+        default=5,
+        help="Maximum number of components to try in cross-validation",
+    )
+    plsr_parser.add_argument(
+        "--n-repetitions",
+        type=int,
+        default=10,
+        help="Number of times to repeat the cross-validation process",
     )
 
     # Parser for the 'snf' command
@@ -379,16 +397,33 @@ def run_plsr_analysis(args):
 
     print(f"Running PLSR with {len(exposure_vars)} exposure variables, {len(cognitive_vars)} cognitive variables, and {len(covariates)} covariates...")
 
-    # Run PLSR
+    # Run PLSR with cross-validation (always enabled)
     from excog_trajectory import analysis
-    plsr_results = analysis.run_plsr(
+
+    if args.n_repetitions > 1:
+        print(
+            f"Running PLSR with double cross-validation ({args.outer_folds} outer folds, {args.inner_folds} inner folds) repeated {args.n_repetitions} times...")
+    else:
+        print(
+            f"Running PLSR with double cross-validation ({args.outer_folds} outer folds, {args.inner_folds} inner folds)...")
+    n_components_range = list(range(1, args.max_components + 1))
+    plsr_results = analysis.run_plsr_cv(
         data=data_df,
         exposure_vars=exposure_vars,
         cognitive_vars=cognitive_vars,
         covariates=covariates,
-        n_components=args.n_components,
+        n_components_range=n_components_range,
+        outer_folds=args.outer_folds,
+        inner_folds=args.inner_folds,
         scale=args.scale,
+        n_repetitions=args.n_repetitions,
     )
+
+    # Print information about the final model
+    if 'final_best_n_components' in plsr_results:
+        final_best_n_comp = plsr_results['final_best_n_components']
+        print(f"\nFinal best number of components: {final_best_n_comp}")
+        print(f"A final model has been trained on the entire dataset using {final_best_n_comp} components.")
 
     # Save the results
     import pickle
@@ -400,46 +435,199 @@ def run_plsr_analysis(args):
     # Create visualizations
     import matplotlib.pyplot as plt
     import numpy as np
+    from sklearn.preprocessing import StandardScaler
 
-    # Plot X loadings
-    plt.figure(figsize=(12, 8))
-    x_loadings = plsr_results["X_loadings"]
-    # Limit to top 20 variables by absolute loading value for readability
-    if len(exposure_vars) > 20:
-        # Get indices of top 20 variables by absolute loading value
-        top_indices = np.argsort(np.abs(x_loadings[:, 0]))[-20:]
-        x_loadings = x_loadings[top_indices, :]
-        x_vars = [plsr_results["X_vars"][i] for i in top_indices]
-    else:
-        x_vars = plsr_results["X_vars"]
+    # Visualizations for cross-validation results
 
-    plt.barh(range(len(x_vars)), x_loadings[:, 0], align='center')
-    plt.yticks(range(len(x_vars)), x_vars)
-    plt.xlabel('Component 1 Loading')
-    plt.title('PLSR X Loadings (Component 1)')
-    plt.tight_layout()
-    plt.savefig(os.path.join(args.output_dir, "plsr_x_loadings.png"), dpi=300)
-
-    # Plot Y loadings
-    plt.figure(figsize=(12, 8))
-    plt.barh(range(len(plsr_results["Y_vars"])), plsr_results["Y_loadings"][:, 0], align='center')
-    plt.yticks(range(len(plsr_results["Y_vars"])), plsr_results["Y_vars"])
-    plt.xlabel('Component 1 Loading')
-    plt.title('PLSR Y Loadings (Component 1)')
-    plt.tight_layout()
-    plt.savefig(os.path.join(args.output_dir, "plsr_y_loadings.png"), dpi=300)
-
-    # Plot explained variance
+    # Plot distribution of best number of components
     plt.figure(figsize=(10, 6))
-    components = range(1, args.n_components + 1)
-    plt.bar(components, plsr_results["X_explained_variance"], alpha=0.7, label='X Variance')
-    plt.bar(components, plsr_results["Y_explained_variance"], alpha=0.7, label='Y Variance')
-    plt.xlabel('Component')
-    plt.ylabel('Explained Variance Ratio')
-    plt.title('PLSR Explained Variance by Component')
+    best_components = plsr_results["best_n_components"]
+    unique_components = sorted(set(best_components))
+    counts = [best_components.count(comp) for comp in unique_components]
+    plt.bar(unique_components, counts)
+    plt.xlabel('Number of Components')
+    plt.ylabel('Frequency')
+
+    # Update title to reflect multiple repetitions if applicable
+    if args.n_repetitions > 1:
+        plt.title(
+            f'Distribution of Optimal Number of Components Across {args.outer_folds} Outer Folds × {args.n_repetitions} Repetitions')
+    else:
+        plt.title('Distribution of Optimal Number of Components Across Outer Folds')
+
+    plt.xticks(unique_components)
+    plt.tight_layout()
+    plt.savefig(os.path.join(args.output_dir, "plsr_cv_best_components.png"), dpi=300)
+
+    # Highlight the final best number of components
+    final_best_n_comp = plsr_results["final_best_n_components"]
+    plt.figure(figsize=(10, 6))
+    plt.bar(unique_components, counts,
+            color=['blue' if comp != final_best_n_comp else 'red' for comp in unique_components])
+    plt.xlabel('Number of Components')
+    plt.ylabel('Frequency')
+    plt.title(f'Final Best Number of Components: {final_best_n_comp}')
+    plt.xticks(unique_components)
+    plt.tight_layout()
+    plt.savefig(os.path.join(args.output_dir, "plsr_cv_final_best_component.png"), dpi=300)
+
+    # Plot outer fold AUROC scores
+    plt.figure(figsize=(10, 6))
+    outer_scores = plsr_results["outer_scores"]
+
+    # If using multiple repetitions, we need to reshape the scores
+    if args.n_repetitions > 1 and 'repetition_best_components' in plsr_results:
+        # Calculate the number of outer folds
+        n_outer_folds = len(plsr_results['repetition_best_components'][0])
+
+        # Reshape the scores to get scores for each fold across repetitions
+        reshaped_scores = np.array(outer_scores).reshape(args.n_repetitions, n_outer_folds)
+
+        # Calculate mean and std for each fold across repetitions
+        mean_scores = np.mean(reshaped_scores, axis=0)
+        std_scores = np.std(reshaped_scores, axis=0)
+
+        # Plot with error bars
+        plt.bar(range(1, n_outer_folds + 1), mean_scores, yerr=std_scores, capsize=5)
+        plt.axhline(y=np.mean(mean_scores), color='r', linestyle='-',
+                    label=f'Mean AUROC: {np.mean(mean_scores):.3f}')
+        plt.xlabel('Outer Fold')
+        plt.ylabel('Mean AUROC Score (across repetitions)')
+        plt.title(f'Mean AUROC Scores Across Outer Folds ({args.n_repetitions} Repetitions)')
+        plt.xticks(range(1, n_outer_folds + 1))
+    else:
+        # Original plot for single repetition
+        plt.bar(range(1, len(outer_scores) + 1), outer_scores)
+        plt.axhline(y=np.mean(outer_scores), color='r', linestyle='-',
+                    label=f'Mean AUROC: {np.mean(outer_scores):.3f}')
+        plt.xlabel('Outer Fold')
+        plt.ylabel('AUROC Score')
+        plt.title('AUROC Scores Across Outer Folds')
+        plt.xticks(range(1, len(outer_scores) + 1))
+
+    plt.ylim(0, 1)
     plt.legend()
     plt.tight_layout()
-    plt.savefig(os.path.join(args.output_dir, "plsr_explained_variance.png"), dpi=300)
+    plt.savefig(os.path.join(args.output_dir, "plsr_cv_outer_scores.png"), dpi=300)
+
+    # Plot inner fold AUROC scores for each number of components
+    plt.figure(figsize=(12, 8))
+    n_components_range = plsr_results["n_components_range"]
+    inner_scores = plsr_results["inner_scores"]
+
+    # Calculate mean scores for each number of components
+    mean_scores = [np.mean(inner_scores[n_comp]) for n_comp in n_components_range]
+    std_scores = [np.std(inner_scores[n_comp]) for n_comp in n_components_range]
+
+    plt.errorbar(n_components_range, mean_scores, yerr=std_scores, fmt='o-', capsize=5)
+    plt.xlabel('Number of Components')
+    plt.ylabel('Mean AUROC Score')
+    plt.title('Mean AUROC Scores Across Inner Folds by Number of Components')
+    plt.xticks(n_components_range)
+    plt.ylim(0, 1)
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.savefig(os.path.join(args.output_dir, "plsr_cv_inner_scores.png"), dpi=300)
+
+    # If there are multiple models (one per outer fold), we can visualize the loadings of the first component
+    # from the model with the best performance on the outer test fold
+    if plsr_results["models"]:
+        best_model_idx = np.argmax(plsr_results["outer_scores"])
+        best_model = plsr_results["models"][best_model_idx]
+
+        # Plot X loadings for the best model from cross-validation
+        plt.figure(figsize=(12, 8))
+        x_loadings = best_model.x_loadings_
+        x_vars = plsr_results["X_vars"]
+
+        # Limit to top 20 variables by absolute loading value for readability
+        if len(x_vars) > 20:
+            # Get indices of top 20 variables by absolute loading value
+            top_indices = np.argsort(np.abs(x_loadings[:, 0]))[-20:]
+            x_loadings = x_loadings[top_indices, :]
+            x_vars = [x_vars[i] for i in top_indices]
+
+        plt.barh(range(len(x_vars)), x_loadings[:, 0], align='center')
+        plt.yticks(range(len(x_vars)), x_vars)
+        plt.xlabel('Component 1 Loading')
+        plt.title(f'PLSR X Loadings (Component 1) - Best Model from Fold {best_model_idx + 1}')
+        plt.tight_layout()
+        plt.savefig(os.path.join(args.output_dir, "plsr_cv_best_model_x_loadings.png"), dpi=300)
+
+        # Plot Y loadings for the best model from cross-validation
+        plt.figure(figsize=(12, 8))
+        y_loadings = best_model.y_loadings_
+        y_vars = plsr_results["Y_vars"]
+
+        plt.barh(range(len(y_vars)), y_loadings[:, 0], align='center')
+        plt.yticks(range(len(y_vars)), y_vars)
+        plt.xlabel('Component 1 Loading')
+        plt.title(f'PLSR Y Loadings (Component 1) - Best Model from Fold {best_model_idx + 1}')
+        plt.tight_layout()
+        plt.savefig(os.path.join(args.output_dir, "plsr_cv_best_model_y_loadings.png"), dpi=300)
+
+    # Visualize the final model trained on the entire dataset
+    if 'final_model' in plsr_results:
+        final_model = plsr_results['final_model']
+        final_best_n_comp = plsr_results['final_best_n_components']
+
+        # Plot X loadings for the final model
+        plt.figure(figsize=(12, 8))
+        x_loadings = final_model.x_loadings_
+        x_vars = plsr_results["X_vars"]
+
+        # Limit to top 20 variables by absolute loading value for readability
+        if len(x_vars) > 20:
+            # Get indices of top 20 variables by absolute loading value
+            top_indices = np.argsort(np.abs(x_loadings[:, 0]))[-20:]
+            x_loadings = x_loadings[top_indices, :]
+            x_vars = [x_vars[i] for i in top_indices]
+
+        plt.barh(range(len(x_vars)), x_loadings[:, 0], align='center')
+        plt.yticks(range(len(x_vars)), x_vars)
+        plt.xlabel('Component 1 Loading')
+        plt.title(f'PLSR X Loadings (Component 1) - Final Model with {final_best_n_comp} Components')
+        plt.tight_layout()
+        plt.savefig(os.path.join(args.output_dir, "plsr_cv_final_model_x_loadings.png"), dpi=300)
+
+        # Plot Y loadings for the final model
+        plt.figure(figsize=(12, 8))
+        y_loadings = final_model.y_loadings_
+        y_vars = plsr_results["Y_vars"]
+
+        plt.barh(range(len(y_vars)), y_loadings[:, 0], align='center')
+        plt.yticks(range(len(y_vars)), y_vars)
+        plt.xlabel('Component 1 Loading')
+        plt.title(f'PLSR Y Loadings (Component 1) - Final Model with {final_best_n_comp} Components')
+        plt.tight_layout()
+        plt.savefig(os.path.join(args.output_dir, "plsr_cv_final_model_y_loadings.png"), dpi=300)
+
+        # If there are multiple components, visualize the explained variance
+        if final_best_n_comp > 1:
+            # Calculate explained variance for the final model
+            X = data_df[plsr_results["X_vars"]].values
+            Y = data_df[plsr_results["Y_vars"]].values
+
+            if args.scale:
+                X = StandardScaler().fit_transform(X)
+                Y = StandardScaler().fit_transform(Y)
+
+            X_scores = final_model.transform(X)
+            Y_scores = final_model.y_scores_
+
+            x_explained_variance = np.var(X_scores, axis=0) / np.var(X, axis=0).sum()
+            y_explained_variance = np.var(Y_scores, axis=0) / np.var(Y, axis=0).sum()
+
+            plt.figure(figsize=(10, 6))
+            components = range(1, final_best_n_comp + 1)
+            plt.bar(components, x_explained_variance, alpha=0.7, label='X Variance')
+            plt.bar(components, y_explained_variance, alpha=0.7, label='Y Variance')
+            plt.xlabel('Component')
+            plt.ylabel('Explained Variance Ratio')
+            plt.title(f'PLSR Explained Variance by Component - Final Model with {final_best_n_comp} Components')
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(os.path.join(args.output_dir, "plsr_cv_final_model_explained_variance.png"), dpi=300)
 
     print(f"PLSR visualizations saved to {args.output_dir}")
     print("PLSR analysis complete!")
@@ -509,7 +697,6 @@ def run_snf_analysis(args):
 
     # Create visualizations
     import matplotlib.pyplot as plt
-    import numpy as np
     from sklearn.manifold import TSNE
     from sklearn.cluster import KMeans
 

@@ -5,26 +5,37 @@ This module provides statistical methods and modeling approaches for analyzing
 the associations between environmental exposures and cognitive outcomes in NHANES data.
 """
 
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
-from sklearn.cross_decomposition import PLSRegression
-from sklearn.preprocessing import StandardScaler
 from scipy.spatial.distance import pdist, squareform
+from sklearn.cross_decomposition import PLSRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import KFold
+from sklearn.preprocessing import StandardScaler
 
 
-def run_plsr(
+def run_plsr_cv(
         data: pd.DataFrame,
         exposure_vars: List[str],
         cognitive_vars: List[str],
         covariates: List[str],
-        n_components: int = 2,
+        n_components_range: List[int] = None,
+        outer_folds: int = 8,
+        inner_folds: int = 7,
         scale: bool = True,
+        random_state: int = 42,
+        n_repetitions: int = 1,
 ) -> Dict[str, object]:
     """
-    Run Partial Least Squares Regression (PLSR) using exposure variables (including covariates)
-    as the X matrix and cognitive variables as the Y matrix.
+    Run Partial Least Squares Regression (PLSR) with double cross-validation.
+
+    Uses an outer cross-validation loop to evaluate model performance and an inner
+    cross-validation loop to optimize the number of components by maximizing AUROC.
+    The process is repeated n_repetitions times, and the best model is selected as
+    the most common number of latent variables evaluated in the outer loop.
+    A final model is trained on the entire dataset using this optimal number of components.
 
     Parameters
     ----------
@@ -36,19 +47,41 @@ def run_plsr(
         List of cognitive variables to include in the Y matrix
     covariates : list of str
         List of covariate variables to include in the X matrix
-    n_components : int, default=2
-        Number of components to use in the PLSR model
+    n_components_range : list of int, default=None
+        Range of number of components to try in the inner cross-validation loop.
+        If None, will use [1, 2, 3, 4, 5]
+    outer_folds : int, default=8
+        Number of folds for the outer cross-validation loop
+    inner_folds : int, default=7
+        Number of folds for the inner cross-validation loop
     scale : bool, default=True
         Whether to standardize the data before running PLSR
+    random_state : int, default=42
+        Random state for reproducibility
+    n_repetitions : int, default=1
+        Number of times to repeat the double cross-validation process
 
     Returns
     -------
     Dict[str, object]
-        Dictionary containing the PLSR model, X and Y loadings, X and Y scores,
-        explained variance, and other relevant information
+        Dictionary containing the cross-validation results, including:
+        - 'best_n_components': List of best number of components for each outer fold across all repetitions
+        - 'outer_scores': AUROC scores for each outer fold across all repetitions
+        - 'inner_scores': AUROC scores for each inner fold and each number of components
+        - 'models': List of fitted PLSR models for each outer fold in the last repetition
+        - 'X_vars': List of X variables used
+        - 'Y_vars': List of Y variables used
+        - 'final_best_n_components': The most common number of components across all outer folds and repetitions
+        - 'final_model': The model trained on the entire dataset using the final best number of components
     """
+    # TODO: check the inner outer loops and what models are saved
+
     # Create a copy of the data to avoid modifying the original
     data_plsr = data.copy()
+
+    # Set default range of components if not provided
+    if n_components_range is None:
+        n_components_range = list(range(1, 6))  # [1, 2, 3, 4, 5]
 
     # Combine exposure variables and covariates for the X matrix
     X_vars = exposure_vars + covariates
@@ -73,33 +106,135 @@ def run_plsr(
         X = X_scaler.fit_transform(X)
         Y = Y_scaler.fit_transform(Y)
 
-    # Create and fit the PLSR model
-    plsr = PLSRegression(n_components=n_components)
-    plsr.fit(X, Y)
-
-    # Get the X and Y scores (projections)
-    X_scores = plsr.transform(X)
-    Y_scores = plsr.y_scores_
-
-    # Calculate explained variance
-    x_explained_variance = np.var(X_scores, axis=0) / np.var(X, axis=0).sum()
-    y_explained_variance = np.var(Y_scores, axis=0) / np.var(Y, axis=0).sum()
-
-    # Create a dictionary to store the results
+    # Initialize results dictionary
     results = {
-        "model": plsr,
-        "X_loadings": plsr.x_loadings_,
-        "Y_loadings": plsr.y_loadings_,
-        "X_scores": X_scores,
-        "Y_scores": Y_scores,
-        "X_explained_variance": x_explained_variance,
-        "Y_explained_variance": y_explained_variance,
-        "X_vars": X_vars,
-        "Y_vars": cognitive_vars,
-        "n_components": n_components,
-        "X_scaler": X_scaler if scale else None,
-        "Y_scaler": Y_scaler if scale else None,
+        'best_n_components'         : [],
+        'outer_scores'              : [],
+        'inner_scores'              : {n_comp: [] for n_comp in n_components_range},
+        'models'                    : [],
+        'X_vars'                    : X_vars,
+        'Y_vars'                    : cognitive_vars,
+        'repetition_best_components': [],  # Track best components for each repetition
     }
+
+    # Repeat the cross-validation process n_repetitions times
+    for rep in range(n_repetitions):
+        # Use a different random state for each repetition
+        rep_random_state = random_state + rep if random_state is not None else None
+
+        # Initialize outer cross-validation
+        outer_cv = KFold(n_splits=outer_folds, shuffle=True, random_state=rep_random_state)
+
+        # Store best components for this repetition
+        rep_best_components = []
+
+        # Outer cross-validation loop
+        for outer_fold, (train_idx, test_idx) in enumerate(outer_cv.split(X)):
+            X_train, X_test = X[train_idx], X[test_idx]
+            Y_train, Y_test = Y[train_idx], Y[test_idx]
+
+            # Initialize inner cross-validation
+            inner_cv = KFold(n_splits=inner_folds, shuffle=True, random_state=rep_random_state)
+
+            # Dictionary to store inner fold scores for each number of components
+            inner_fold_scores = {n_comp: [] for n_comp in n_components_range}
+
+            # Inner cross-validation loop
+            for inner_fold, (inner_train_idx, inner_val_idx) in enumerate(inner_cv.split(X_train)):
+                X_inner_train, X_inner_val = X_train[inner_train_idx], X_train[inner_val_idx]
+                Y_inner_train, Y_inner_val = Y_train[inner_train_idx], Y_train[inner_val_idx]
+
+                # Try different numbers of components
+                for n_comp in n_components_range:
+                    # Fit PLS model
+                    plsr = PLSRegression(n_components=n_comp)
+                    plsr.fit(X_inner_train, Y_inner_train)
+
+                    # Predict on validation set
+                    Y_inner_pred = plsr.predict(X_inner_val)
+
+                    # Calculate AUROC for each cognitive variable and average
+                    auroc_scores = []
+                    for i in range(Y_inner_val.shape[1]):
+                        # Convert predictions to binary for AUROC calculation
+                        # Using median as threshold for simplicity
+                        y_true_binary = (Y_inner_val[:, i] > np.median(Y_inner_val[:, i])).astype(int)
+                        y_pred_score = Y_inner_pred[:, i]
+
+                        try:
+                            auroc = roc_auc_score(y_true_binary, y_pred_score)
+                            auroc_scores.append(auroc)
+                        except ValueError:
+                            # Handle case where all true values are the same class
+                            auroc_scores.append(0.5)  # Random guess
+
+                    # Average AUROC across cognitive variables
+                    mean_auroc = np.mean(auroc_scores)
+                    inner_fold_scores[n_comp].append(mean_auroc)
+
+            # Calculate average AUROC for each number of components across inner folds
+            mean_inner_scores = {n_comp: np.mean(scores) for n_comp, scores in inner_fold_scores.items()}
+
+            # Find the best number of components
+            best_n_comp = max(mean_inner_scores, key=mean_inner_scores.get)
+            results['best_n_components'].append(best_n_comp)
+            rep_best_components.append(best_n_comp)
+
+            # Store inner fold scores (only for the last repetition to save memory)
+            if rep == n_repetitions - 1:
+                for n_comp, scores in inner_fold_scores.items():
+                    results['inner_scores'][n_comp].extend(scores)
+
+            # Train final model with best number of components on all training data
+            best_model = PLSRegression(n_components=best_n_comp)
+            best_model.fit(X_train, Y_train)
+
+            # Only store models from the last repetition to save memory
+            if rep == n_repetitions - 1:
+                results['models'].append(best_model)
+
+            # Evaluate on test set
+            Y_test_pred = best_model.predict(X_test)
+
+            # Calculate AUROC for each cognitive variable and average
+            outer_auroc_scores = []
+            for i in range(Y_test.shape[1]):
+                # Convert predictions to binary for AUROC calculation
+                y_true_binary = (Y_test[:, i] > np.median(Y_test[:, i])).astype(int)
+                y_pred_score = Y_test_pred[:, i]
+
+                try:
+                    auroc = roc_auc_score(y_true_binary, y_pred_score)
+                    outer_auroc_scores.append(auroc)
+                except ValueError:
+                    # Handle case where all true values are the same class
+                    outer_auroc_scores.append(0.5)  # Random guess
+
+            # Average AUROC across cognitive variables
+            mean_outer_auroc = np.mean(outer_auroc_scores)
+            results['outer_scores'].append(mean_outer_auroc)
+
+        # Store the best components for this repetition
+        results['repetition_best_components'].append(rep_best_components)
+
+    # Find the most common number of components across all outer folds and repetitions
+    all_best_components = results['best_n_components']
+    from collections import Counter
+    component_counts = Counter(all_best_components)
+    final_best_n_comp = component_counts.most_common(1)[0][0]
+    results['final_best_n_components'] = final_best_n_comp
+
+    # Train a final model on the entire dataset using the most common number of components
+    final_model = PLSRegression(n_components=final_best_n_comp)
+    final_model.fit(X, Y)
+    results['final_model'] = final_model
+
+    # Add additional information to results
+    results['n_components_range'] = n_components_range
+    results['outer_folds'] = outer_folds
+    results['inner_folds'] = inner_folds
+    results['scale'] = scale
+    results['n_repetitions'] = n_repetitions
 
     return results
 

@@ -109,48 +109,6 @@ def test_calculate_exposure_indices():
     assert id(result) != id(test_data)
 
 
-def test_run_plsr():
-    """Test that run_plsr returns a dictionary with the expected keys and shapes."""
-    # Create a mock DataFrame
-    test_data = pd.DataFrame({
-        "exposure1": [0.1, 0.2, 0.3, 0.4, 0.5],
-        "exposure2": [1.0, 2.0, 3.0, 4.0, 5.0],
-        "cognitive1": [10, 20, 30, 40, 50],
-        "covariate1": [100, 200, 300, 400, 500],
-        "covariate2": [1000, 2000, 3000, 4000, 5000]
-    })
-
-    # Call the function
-    result = analysis.run_plsr(
-        data=test_data,
-        exposure_vars=["exposure1", "exposure2"],
-        cognitive_vars=["cognitive1"],
-        covariates=["covariate1", "covariate2"],
-        n_components=2,
-        scale=True
-    )
-
-    # Check that the result is a dictionary
-    assert isinstance(result, dict)
-
-    # Check that the result contains the expected keys
-    expected_keys = [
-        "model", "X_loadings", "Y_loadings", "X_scores", "Y_scores",
-        "X_explained_variance", "Y_explained_variance", "X_vars",
-        "Y_vars", "n_components", "X_scaler", "Y_scaler"
-    ]
-    for key in expected_keys:
-        assert key in result
-
-    # Check that the shapes of the results are correct
-    assert result["X_loadings"].shape == (4, 2)  # 2 exposure vars + 2 covariates, 2 components
-    assert result["Y_loadings"].shape == (1, 2)  # 1 cognitive var, 2 components
-    assert result["X_scores"].shape == (5, 2)    # 5 samples, 2 components
-    assert result["Y_scores"].shape == (5, 2)    # 5 samples, 2 components
-
-    # Check that the explained variance is positive
-    assert np.all(result["X_explained_variance"] > 0)
-    assert np.all(result["Y_explained_variance"] > 0)
 
 
 def test_run_snf():
