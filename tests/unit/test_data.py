@@ -21,28 +21,37 @@ def test_load_nhanes_data():
         # Test with default path
         result = data.load_nhanes_data()
 
-        # Check that the function tried to read the correct file
-        mock_read_csv.assert_called_once_with('data/raw/nh_99-06/MainTable.csv')
+        # Check that the function tried to read the correct files
+        assert mock_read_csv.call_count == 2
+        mock_read_csv.assert_any_call(os.path.join('data/raw', 'nhanes_data_1.csv'), index_col='SEQN')
+        mock_read_csv.assert_any_call(os.path.join('data/raw', 'nhanes_data_2.csv'), index_col='SEQN')
 
-        # Check that the result is a dictionary with the key 'main' pointing to the mocked DataFrame
+        # Check that the result is a dictionary with the keys 'data_1' and 'data_2' pointing to the mocked DataFrame
         assert isinstance(result, dict)
-        assert 'main' in result
-        assert result['main'] is mock_df
+        assert 'data_1' in result
+        assert 'data_2' in result
+        assert result['data_1'] is mock_df
+        assert result['data_2'] is mock_df
 
         # Reset mock for next test
         mock_read_csv.reset_mock()
 
-        # Test with custom path
-        custom_path = 'custom/path/to/data.csv'
-        result = data.load_nhanes_data(data_path=custom_path)
+        # Test with custom path and custom file names
+        custom_path = 'custom/path/to/'
+        custom_files = ['custom_data_1.csv', 'custom_data_2.csv']
+        result = data.load_nhanes_data(data_path=custom_path, file_names=custom_files)
 
-        # Check that the function tried to read the custom file path
-        mock_read_csv.assert_called_once_with(custom_path)
+        # Check that the function tried to read the custom file paths
+        assert mock_read_csv.call_count == 2
+        mock_read_csv.assert_any_call(os.path.join(custom_path, custom_files[0]), index_col='SEQN')
+        mock_read_csv.assert_any_call(os.path.join(custom_path, custom_files[1]), index_col='SEQN')
 
-        # Check that the result is a dictionary with the key 'main' pointing to the mocked DataFrame
+        # Check that the result is a dictionary with the keys 'data_1' and 'data_2' pointing to the mocked DataFrame
         assert isinstance(result, dict)
-        assert 'main' in result
-        assert result['main'] is mock_df
+        assert 'data_1' in result
+        assert 'data_2' in result
+        assert result['data_1'] is mock_df
+        assert result['data_2'] is mock_df
 
 
 def test_get_cognitive_data():
@@ -334,41 +343,38 @@ def test_get_columns_with_nan():
 @patch('urllib.request.urlretrieve')
 @patch('os.makedirs')
 def test_download_nhanes_data(mock_makedirs, mock_urlretrieve):
-    """Test that download_nhanes_data correctly downloads data using file ID."""
+    """Test that download_nhanes_data correctly downloads data from direct URLs."""
     # Setup mock return value
-    test_output_path = "test/path/nhanes_data.zip"
+    test_output_path = "test/path/nhanes_data.csv"
     mock_urlretrieve.return_value = (test_output_path, None)
 
-    # Test with default parameters
-    result = data.download_nhanes_data()
-
-    # Check that the correct URL was constructed with the file ID
-    expected_url = f"https://datadryad.org/api/v2/files/70319/download"
-    mock_urlretrieve.assert_called_once_with(expected_url, os.path.join("data/raw", "nhanes_data.zip"))
-    assert result == os.path.join("data/raw", "nhanes_data.zip")
-
-    # Reset mock for next test
-    mock_urlretrieve.reset_mock()
-
-    # Test with custom file ID
-    custom_id = "12345"
-    result = data.download_nhanes_data(id=custom_id)
-
-    # Check that the correct URL was constructed with the custom file ID
-    expected_url = f"https://datadryad.org/api/v2/files/12345/download"
-    mock_urlretrieve.assert_called_once_with(expected_url, os.path.join("data/raw", "nhanes_data.zip"))
-    assert result == os.path.join("data/raw", "nhanes_data.zip")
-
-    # Reset mock for next test
-    mock_urlretrieve.reset_mock()
-
-    # Test with direct URL
-    direct_url = "https://example.com/data.zip"
+    # Test with single direct URL
+    direct_url = "https://osf.io/download/9aupq/"
     result = data.download_nhanes_data(direct_url=direct_url)
 
     # Check that the direct URL was used
-    mock_urlretrieve.assert_called_once_with(direct_url, os.path.join("data/raw", "nhanes_data.zip"))
-    assert result == os.path.join("data/raw", "nhanes_data.zip")
+    mock_urlretrieve.assert_called_once_with(direct_url, os.path.join("data/raw", "nhanes_data.csv"))
+    assert result == os.path.join("data/raw", "nhanes_data.csv")
+
+    # Reset mock for next test
+    mock_urlretrieve.reset_mock()
+
+    # Test with multiple direct URLs
+    direct_urls = ["https://osf.io/download/9aupq/", "https://osf.io/download/9vewm/"]
+    result = data.download_nhanes_data(direct_url=direct_urls)
+
+    # Check that the function returns a list of paths
+    assert isinstance(result, list)
+    assert len(result) == 2
+
+    # Check that urlretrieve was called for each URL
+    assert mock_urlretrieve.call_count == 2
+    mock_urlretrieve.assert_any_call(direct_urls[0], os.path.join("data/raw", "nhanes_data_1.csv"))
+    mock_urlretrieve.assert_any_call(direct_urls[1], os.path.join("data/raw", "nhanes_data_2.csv"))
+
+    # Check that the returned paths are correct
+    assert result[0] == os.path.join("data/raw", "nhanes_data_1.csv")
+    assert result[1] == os.path.join("data/raw", "nhanes_data_2.csv")
 
 
 def test_filter_variables():

@@ -8,7 +8,6 @@ NHANES data related to cognitive assessments and environmental exposures.
 import os
 import shutil
 import urllib.request
-import zipfile
 from typing import Dict, List, Optional, Tuple, Union
 
 import dill
@@ -23,7 +22,7 @@ def load_nhanes_data(
         file_names: Optional[List[str]] = None,
 ) -> Dict[str, pd.DataFrame]:
     """
-    Load NHANES data for specified survey cycle(s).
+    Load NHANES data.
 
     Parameters
     ----------
@@ -35,27 +34,32 @@ def load_nhanes_data(
     Returns
     -------
     dict[pd.DataFrame]
-        Dictionary of DataFrame containing the loaded NHANES data and var descriptions.
+        Dictionary of DataFrame containing the loaded NHANES data.
     """
     # Use the default path if none is provided
     if data_path is None:
-        data_path = "data/raw/nh_99-06/"
+        data_path = "data/raw/"
 
     if file_names is None:
-        file_names = ["MainTable.csv", "VarDescription.csv"]
+        file_names = ["nhanes_data_1.csv", "nhanes_data_2.csv"]
 
     # Check if the files exist
     for file in file_names:
         if not os.path.exists(os.path.join(data_path, file)):
             raise FileNotFoundError(f"NHANES data file '{file}' not found at {data_path}")
 
-    # Load the main NHANES data file as dict
+    # Load the NHANES data files
     print(f"Loading NHANES data from {data_path}...")
-    main_data = pd.read_csv(os.path.join(data_path, file_names[0]), index_col="SEQN")
-    var_description = pd.read_csv(os.path.join(data_path, file_names[1]))
+    data_dict = {}
 
-    # Return a dataframe with the loaded data
-    return {"main": main_data, "description": var_description}
+    for i, file in enumerate(file_names):
+        data_key = f"data_{i+1}"
+        data_dict[data_key] = pd.read_csv(os.path.join(data_path, file),
+                                          index_col="sample",
+                                          na_values=["nan"]).drop("sequence", axis=1)
+
+    # Return a dictionary with the loaded data
+    return data_dict
 
 
 def remove_nan_from_columns(data: pd.DataFrame, columns: Union[str, List[str]] = 'CFDRIGHT') -> pd.DataFrame:
@@ -127,46 +131,65 @@ def get_columns_with_nan(data: pd.DataFrame) -> Dict[str, int]:
 def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
     """
     Create a DataFrame that shows the name of each column and the percentage of missing data,
-    grouped by survey year (SDDSRVYR), in a wide format.
+    grouped by cycle or survey year, in a wide format.
 
     Parameters
     ----------
     data : pd.DataFrame
-        DataFrame to check for missing values. Must contain a 'SDDSRVYR' column.
+        DataFrame to check for missing values. Should contain either a 'SDDSRVYR' or 'Cycle' column.
+        If neither is present, will calculate overall missing percentages.
 
     Returns
     -------
     pd.DataFrame
         DataFrame in wide format where:
         - Each row represents a variable (column) from the original data
-        - Each column represents a survey year, showing the percentage of missing data for that variable in that year
+        - Each column represents a cycle or survey year, showing the percentage of missing data for that variable
     """
-    # Check if SDDSRVYR column exists in the data
-    if 'SDDSRVYR' not in data.columns:
-        raise ValueError("DataFrame must contain a 'SDDSRVYR' column")
-
     # Initialize an empty list to store results
     results = []
 
-    # Get unique survey years
-    survey_years = data['SDDSRVYR'].unique()
+    # Determine which column to use for grouping
+    if 'SDDSRVYR' in data.columns:
+        group_col = 'SDDSRVYR'
+        group_name = 'survey_year'
+    elif 'Cycle' in data.columns:
+        group_col = 'Cycle'
+        group_name = 'cycle'
+    else:
+        # If neither column exists, calculate overall missing percentages
+        total_rows = len(data)
+        for col in data.columns:
+            missing_percentage = (data[col].isna().sum() / total_rows) * 100
+            results.append({
+                'column_name': col,
+                'percentage_missing': missing_percentage
+            })
 
-    # For each survey year, calculate the percentage of missing values for each column
-    for year in survey_years:
-        # Filter data for the current survey year
-        year_data = data[data['SDDSRVYR'] == year]
+        # Create DataFrame and sort by missing percentage
+        df = pd.DataFrame(results)
+        df = df.sort_values('percentage_missing', ascending=False)
+        return df
 
-        # Get the total number of rows for this survey year
-        total_rows = len(year_data)
+    # Get unique group values
+    group_values = data[group_col].unique()
+
+    # For each group value, calculate the percentage of missing values for each column
+    for value in group_values:
+        # Filter data for the current group value
+        group_data = data[data[group_col] == value]
+
+        # Get the total number of rows for this group
+        total_rows = len(group_data)
 
         # Calculate the percentage of missing values for each column
         for col in data.columns:
-            missing_percentage = (year_data[col].isna().sum() / total_rows) * 100
+            missing_percentage = (group_data[col].isna().sum() / total_rows) * 100
 
             # Add the result to our list
             results.append({
-                'survey_year'       : year,
-                'column_name'       : col,
+                group_name: value,
+                'column_name': col,
                 'percentage_missing': missing_percentage
             })
 
@@ -174,18 +197,19 @@ def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
     long_df = pd.DataFrame(results)
 
     # Pivot the DataFrame to get it in wide format
-    # Each row will be a column from the original data
-    # Each column will be a survey year
-    wide_df = long_df.pivot(index='column_name', columns='survey_year', values='percentage_missing')
+    wide_df = long_df.pivot(index='column_name', columns=group_name, values='percentage_missing')
 
     # Rename the columns to make them more descriptive
-    wide_df.columns = [f'year_{year}_missing_pct' for year in wide_df.columns]
+    if group_col == 'SDDSRVYR':
+        wide_df.columns = [f'year_{value}_missing_pct' for value in wide_df.columns]
+    else:
+        wide_df.columns = [f'cycle_{value}_missing_pct' for value in wide_df.columns]
 
     # Reset the index to make 'column_name' a regular column
     wide_df = wide_df.reset_index()
 
-    # Sort by the first year's missing percentage (descending)
-    if len(wide_df.columns) > 1:  # Make sure there's at least one year column
+    # Sort by the first group's missing percentage (descending)
+    if len(wide_df.columns) > 1:  # Make sure there's at least one group column
         wide_df = wide_df.sort_values(wide_df.columns[1], ascending=False)
 
     return wide_df
@@ -323,49 +347,74 @@ def filter_exposure_variables(nhanes_data: Dict[str, pd.DataFrame],
 
 
 def download_nhanes_data(
+        direct_url: Union[str, List[str]],
         output_dir: str = "data/raw",
-        id: str = "70319",
-        filename: str = "nhanes_data.zip",
-        direct_url: str = None
-) -> str:
+        filename: str = "nhanes_data.csv"
+) -> Union[str, List[str]]:
     """
-    Download NHANES data from Data Dryad using the API or a direct URL and save it to the output directory.
+    Download NHANES data from direct URL(s) and save it to the output directory.
 
     Parameters
     ----------
     output_dir : str, optional
         Directory to save the downloaded data, by default "data/raw"
-    id : str, optional
-        The file ID for the dataset in Data Dryad,
-        by default "70319"
     filename : str, optional
-        Name to save the downloaded file as, by default "nhanes_data.zip"
-    direct_url : str, optional
-        Direct URL to download the data from, bypassing the Data Dryad API.
-        If provided, this will be used instead of constructing a URL from the DOI.
+        Name to save the downloaded file as, by default "nhanes_data.csv"
+        If multiple URLs are provided, this will be used as a base name with indices appended.
+    direct_url : Union[str, List[str]]
+        Direct URL(s) to download the data from.
+        Can be a single URL string or a list of URL strings.
 
     Returns
     -------
-    str
-        Path to the downloaded file
+    Union[str, List[str]]
+        Path to the downloaded file or list of paths to downloaded files if multiple URLs were provided
     """
     # Create the output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
 
+    # Handle the case where direct_url is a list of URLs
+    if isinstance(direct_url, list) and len(direct_url) > 0:
+        output_paths = []
+        for i, url in enumerate(direct_url):
+            # Generate a filename for each URL
+            if len(direct_url) > 1:
+                # If there are multiple URLs, append an index to the filename
+                base_name, ext = os.path.splitext(filename)
+                current_filename = f"{base_name}_{i+1}{ext}"
+            else:
+                current_filename = filename
+
+            # Full path for the output file
+            output_path = os.path.join(output_dir, current_filename)
+
+            print(f"Downloading NHANES data from direct URL ({i+1}/{len(direct_url)}): {url}...")
+
+            # Download the file
+            try:
+                urllib.request.urlretrieve(url, output_path)
+                print(f"Download complete. File saved to {output_path}")
+                output_paths.append(output_path)
+            except urllib.error.HTTPError as e:
+                if e.code == 403:
+                    print("Access forbidden. This might be due to API rate limiting or authentication requirements.")
+                elif e.code == 404:
+                    print(f"Dataset not found. Please check the URL.")
+                    print("Alternative options:")
+                    print("1. Search for NHANES datasets at: https://datadryad.org/search?q=nhanes")
+                    print("2. Download directly from the NHANES website: https://www.cdc.gov/nchs/nhanes/index.htm")
+                raise
+
+        return output_paths
+
+    # Handle the case where direct_url is a single URL
     # Full path for the output file
     output_path = os.path.join(output_dir, filename)
 
-    # If a direct URL is provided, use it instead of the DOI-based API
-    if direct_url:
-        download_url = direct_url
-        print(f"Downloading NHANES data from direct URL: {direct_url}...")
-    else:
-        # Construct the API URL using the file ID
-        download_url = f"https://datadryad.org/api/v2/files/70319/download"
-        print(f"Downloading NHANES data from Data Dryad (file ID: {id})...")
-        print("Note: The default file ID (70319) may be outdated. If download fails, try using a direct URL.")
-
     # Download the file
+    download_url = direct_url
+    print(f"Downloading NHANES data from direct URL: {direct_url}...")
+
     try:
         urllib.request.urlretrieve(download_url, output_path)
         print(f"Download complete. File saved to {output_path}")
@@ -373,11 +422,9 @@ def download_nhanes_data(
         if e.code == 403:
             print("Access forbidden. This might be due to API rate limiting or authentication requirements.")
         elif e.code == 404:
-            print(f"Dataset not found. Please check the URL or DOI.")
+            print(f"Dataset not found. Please check the URL.")
             print("Alternative options:")
-            print("1. Search for NHANES datasets at: https://datadryad.org/search?q=nhanes")
-            print("2. Download directly from the NHANES website: https://www.cdc.gov/nchs/nhanes/index.htm")
-            print("3. Use a direct URL with the direct_url parameter")
+            print("1. Download directly from the NHANES website: https://www.cdc.gov/nchs/nhanes/index.htm")
         raise
 
     return output_path
@@ -553,65 +600,52 @@ def apply_qc_rules(
 
 
 def extract_nhanes_data(
-        zip_path: str,
+        csv_path: Union[str, List[str]],
         output_dir: str = "data/raw"
 ) -> Tuple[str, List[str]]:
     """
-    Extract NHANES data from a zip file and move the contents to the output directory.
+    Copy NHANES CSV data files to the output directory.
 
     Parameters
     ----------
-    zip_path : str
-        Path to the downloaded zip file
+    csv_path : Union[str, List[str]]
+        Path to the downloaded CSV file or a list of paths to downloaded CSV files
     output_dir : str, optional
-        Directory to save the extracted files, by default "data/raw"
+        Directory to save the CSV files, by default "data/raw"
 
     Returns
     -------
     Tuple[str, List[str]]
-        A tuple containing the output directory and a list of extracted file paths
+        A tuple containing the output directory and a list of copied file paths
     """
     # Create the output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
 
-    # Create a temporary directory for extraction
-    temp_dir = os.path.join(os.path.dirname(zip_path), "temp_extract")
-    os.makedirs(temp_dir, exist_ok=True)
+    # Convert single csv path to list for consistent handling
+    if isinstance(csv_path, str):
+        csv_paths = [csv_path]
+    else:
+        csv_paths = csv_path
 
-    extracted_files = []
+    copied_files = []
 
-    try:
-        print(f"Extracting {zip_path}...")
+    for file_path in csv_paths:
+        # If the file is already in the output directory, no need to copy
+        if os.path.dirname(file_path) == os.path.abspath(output_dir):
+            copied_files.append(file_path)
+            print(f"File {file_path} is already in the output directory")
+            continue
 
-        # Extract the zip file to the temporary directory
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(temp_dir)
+        # Create the destination path
+        dest_path = os.path.join(output_dir, os.path.basename(file_path))
 
-        # Get a list of all extracted files
-        for root, _, files in os.walk(temp_dir):
-            for file in files:
-                src_path = os.path.join(root, file)
-                # Calculate the relative path to maintain directory structure
-                rel_path = os.path.relpath(src_path, temp_dir)
-                dest_path = os.path.join(output_dir, rel_path)
+        # Copy the file to the destination
+        shutil.copy2(file_path, dest_path)
+        copied_files.append(dest_path)
+        print(f"Copied {file_path} to {dest_path}")
 
-                # Create destination directory if it doesn't exist
-                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-
-                # Move the file to the destination
-                shutil.move(src_path, dest_path)
-                extracted_files.append(dest_path)
-                print(f"Moved {rel_path} to {dest_path}")
-
-        print(f"Extraction complete. {len(extracted_files)} files moved to {output_dir}")
-
-    finally:
-        # Clean up the temporary directory
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-            print(f"Cleaned up temporary directory: {temp_dir}")
-
-    return output_dir, extracted_files
+    print(f"All files copied to {output_dir}")
+    return output_dir, copied_files
 
 
 def identify_variable_types(data: pd.DataFrame) -> Dict[str, str]:

@@ -56,11 +56,11 @@ excog download
 # Specify a different output directory
 excog download --output-dir path/to/directory
 
-# Specify a different DOI or filename
-excog download --doi 10.5061/dryad.example --filename custom_name.zip
+# Specify a different filename
+excog download --filename custom_name.csv
 
-# Use a direct URL instead of the Data Dryad API
-excog download --direct-url https://example.com/nhanes_data.zip
+# Specify custom direct URLs (default uses OSF URLs)
+excog download --direct-url https://example.com/nhanes_data1.csv https://example.com/nhanes_data2.csv
 ```
 
 #### Run Analysis
