@@ -1,11 +1,11 @@
 """
-Integration tests for downloading and extracting NHANES data.
+Integration tests for downloading NHANES data.
 """
 
 import pytest
 import os
 import shutil
-from excog_trajectory.data import download_nhanes_data, extract_nhanes_data
+from excog_trajectory.data import download_nhanes_data
 
 
 @pytest.fixture
@@ -19,35 +19,21 @@ def test_output_dir():
 
 
 @pytest.mark.integration
-def test_download_extract_pipeline(test_output_dir):
-    """Test the full download and extract pipeline."""
+def test_download_pipeline(test_output_dir):
+    """Test the download pipeline."""
     # Skip this test by default since it requires internet connection
     pytest.skip("Skipping integration test that requires internet connection")
-    
+
     # Download the data
-    zip_path = download_nhanes_data(
+    csv_path = download_nhanes_data(
         output_dir=test_output_dir,
-        id="70319",
-        filename="nhanes_test_data.zip",
-        direct_url="https://datadryad.org/api/v2/files/70319/download"
+        filename="nhanes_test_data.csv",
+        direct_url="https://osf.io/download/9aupq/"
     )
-    
-    # Check that the zip file was downloaded
-    assert os.path.exists(zip_path)
-    assert os.path.getsize(zip_path) > 0
-    
-    # Extract the data
-    output_dir, extracted_files = extract_nhanes_data(
-        zip_path=zip_path,
-        output_dir=test_output_dir
-    )
-    
-    # Check that files were extracted
-    assert len(extracted_files) > 0
-    assert os.path.exists(output_dir)
-    
-    # Check that at least one of the extracted files exists
-    assert os.path.exists(os.path.join(output_dir, extracted_files[0]))
+
+    # Check that the CSV file was downloaded
+    assert os.path.exists(csv_path)
+    assert os.path.getsize(csv_path) > 0
 
 
 @pytest.mark.integration
@@ -55,13 +41,39 @@ def test_download_with_direct_url(test_output_dir):
     """Test downloading data with a direct URL."""
     # Skip this test by default since it requires internet connection
     pytest.skip("Skipping integration test that requires internet connection")
-    
+
     # Download the data with a direct URL
-    zip_path = download_nhanes_data(
+    csv_path = download_nhanes_data(
         output_dir=test_output_dir,
-        direct_url="https://datadryad.org/api/v2/files/70319/download"
+        direct_url="https://osf.io/download/9vewm/"
     )
-    
-    # Check that the zip file was downloaded
-    assert os.path.exists(zip_path)
-    assert os.path.getsize(zip_path) > 0
+
+    # Check that the CSV file was downloaded
+    assert os.path.exists(csv_path)
+    assert os.path.getsize(csv_path) > 0
+
+
+@pytest.mark.integration
+def test_download_multiple_files(test_output_dir):
+    """Test downloading multiple files."""
+    # Skip this test by default since it requires internet connection
+    pytest.skip("Skipping integration test that requires internet connection")
+
+    # Download multiple files
+    direct_urls = [
+        "https://osf.io/download/9aupq/",
+        "https://osf.io/download/9vewm/"
+    ]
+
+    csv_paths = download_nhanes_data(
+        output_dir=test_output_dir,
+        filename="nhanes_test_data.csv",
+        direct_url=direct_urls
+    )
+
+    # Check that the CSV files were downloaded
+    assert isinstance(csv_paths, list)
+    assert len(csv_paths) == 2
+    for csv_path in csv_paths:
+        assert os.path.exists(csv_path)
+        assert os.path.getsize(csv_path) > 0

@@ -18,7 +18,6 @@ The goal of this project is to investigate how various environmental exposures (
   - Use cross-validation to assess imputation performance
   - Focus imputation only on exposure variables
 - Analyze relationships between exposures and cognitive outcomes using various statistical methods
-- Examine longitudinal trajectories of cognitive decline in relation to exposure levels
 - Visualize exposure-outcome relationships and analysis results
 
 ## Installation
@@ -56,24 +55,24 @@ excog download
 # Specify a different output directory
 excog download --output-dir path/to/directory
 
-# Specify a different DOI or filename
-excog download --doi 10.5061/dryad.example --filename custom_name.zip
+# Specify a different filename
+excog download --filename custom_name.csv
 
-# Use a direct URL instead of the Data Dryad API
-excog download --direct-url https://example.com/nhanes_data.zip
+# Specify custom direct URLs (default uses OSF URLs)
+excog download --direct-url https://example.com/nhanes_data1.csv https://example.com/nhanes_data2.csv
 ```
 
-#### Run Analysis
+#### Run Data Cleaning
 
 ```bash
-# Run the analysis pipeline with default settings
-excog analyze
+# Run the cleaning pipeline with default settings
+excog clean
 
-# Specify a different NHANES cycle
-excog analyze --cycle "2013-2014"
+# Specify a different results directory
+excog clean --output-dir "results"
 
-# Specify a different data path or output directory
-excog analyze --data-path path/to/data --output-dir path/to/results
+# Specify a different data path to save cleaned data
+excog analyze --output-data "data/processed"
 ```
 
 #### Impute Missing Values
@@ -85,11 +84,8 @@ excog impute
 # Specify a different data path or output path
 excog impute --data-path path/to/cleaned_data.csv --output-path path/to/imputed_data.csv
 
-# Specify a variable description file
-excog impute --description-path path/to/description.csv
-
 # Customize imputation parameters
-excog impute --n-imputations 10 --n-cv-folds 10 --random-state 123
+excog impute --n-imputations 10 --n-iterations 10 --random-state 121
 ```
 
 ### Python API

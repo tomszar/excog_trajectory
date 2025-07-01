@@ -9,12 +9,12 @@ from unittest.mock import patch, MagicMock
 from excog_trajectory import cli
 
 
-def test_parse_args_analyze():
-    """Test that parse_args correctly parses analyze command arguments."""
-    with patch('sys.argv', ['excog_trajectory', 'analyze', '--cycle', '2013-2014', '--data-path', 'custom/path', '--output-dir', 'custom/output']):
+def test_parse_args_clean():
+    """Test that parse_args correctly parses clean command arguments."""
+    with patch('sys.argv', ['excog_trajectory', 'clean', '--cycle', '2013-2014', '--data-path', 'custom/path', '--output-dir', 'custom/output']):
         args = cli.parse_args()
-        
-        assert args.command == 'analyze'
+
+        assert args.command == 'clean'
         assert args.cycle == '2013-2014'
         assert args.data_path == 'custom/path'
         assert args.output_dir == 'custom/output'
@@ -22,23 +22,22 @@ def test_parse_args_analyze():
 
 def test_parse_args_download():
     """Test that parse_args correctly parses download command arguments."""
-    with patch('sys.argv', ['excog_trajectory', 'download', '--output-dir', 'custom/download', '--id', '12345', '--filename', 'custom.zip']):
+    with patch('sys.argv', ['excog_trajectory', 'download', '--output-dir', 'custom/download', '--filename', 'custom.csv']):
         args = cli.parse_args()
-        
+
         assert args.command == 'download'
         assert args.output_dir == 'custom/download'
-        assert args.id == '12345'
-        assert args.filename == 'custom.zip'
-        assert args.direct_url is None
+        assert args.filename == 'custom.csv'
+        assert args.direct_url == ["https://osf.io/download/9aupq/", "https://osf.io/download/9vewm/"]
 
 
 def test_parse_args_download_direct_url():
     """Test that parse_args correctly parses download command with direct URL."""
-    with patch('sys.argv', ['excog_trajectory', 'download', '--direct-url', 'https://example.com/data.zip']):
+    with patch('sys.argv', ['excog_trajectory', 'download', '--direct-url', 'https://example.com/data.csv']):
         args = cli.parse_args()
-        
+
         assert args.command == 'download'
-        assert args.direct_url == 'https://example.com/data.zip'
+        assert args.direct_url == ['https://example.com/data.csv']
 
 
 def test_parse_args_no_command():
@@ -61,11 +60,11 @@ def test_parse_args_no_command():
 @patch('os.makedirs')
 @patch('pandas.DataFrame.to_csv')
 @patch('matplotlib.figure.Figure.savefig')
-def test_run_analysis(mock_savefig, mock_to_csv, mock_makedirs, mock_plot_coef, 
+def test_clean_data(mock_savefig, mock_to_csv, mock_makedirs, mock_plot_coef, 
                      mock_plot_relationships, mock_plot_dist, mock_run_models, 
                      mock_remove_nan, mock_merge, mock_get_exposure, 
                      mock_get_cognitive, mock_load_nhanes):
-    """Test that run_analysis executes the analysis pipeline without errors."""
+    """Test that clean_data executes the data cleaning pipeline without errors."""
     # Setup mock return values
     mock_load_nhanes.return_value = {'main': pd.DataFrame()}
     mock_get_cognitive.return_value = pd.DataFrame()
@@ -89,16 +88,16 @@ def test_run_analysis(mock_savefig, mock_to_csv, mock_makedirs, mock_plot_coef,
     mock_plot_dist.return_value = MagicMock()
     mock_plot_relationships.return_value = MagicMock()
     mock_plot_coef.return_value = MagicMock()
-    
+
     # Create args object
     args = MagicMock()
     args.cycle = '2011-2012'
     args.data_path = 'test/data'
     args.output_dir = 'test/output'
-    
+
     # Call the function
-    cli.run_analysis(args)
-    
+    cli.clean_data(args)
+
     # Check that all the expected functions were called
     mock_makedirs.assert_called_once_with('test/output', exist_ok=True)
     mock_load_nhanes.assert_called_once_with(data_path='test/data')
@@ -115,87 +114,79 @@ def test_run_analysis(mock_savefig, mock_to_csv, mock_makedirs, mock_plot_coef,
 
 
 @patch('excog_trajectory.data.download_nhanes_data')
-@patch('excog_trajectory.data.extract_nhanes_data')
-def test_run_download(mock_extract, mock_download):
+def test_run_download(mock_download):
     """Test that run_download executes the download pipeline without errors."""
     # Setup mock return values
-    mock_download.return_value = 'test/path/to/zip'
-    mock_extract.return_value = ('test/output/dir', ['file1.csv', 'file2.csv'])
-    
+    mock_download.return_value = 'test/path/to/csv'
+
     # Create args object
     args = MagicMock()
     args.output_dir = 'test/output'
-    args.id = '12345'
-    args.filename = 'test.zip'
-    args.direct_url = 'https://example.com/data.zip'
-    
+    args.filename = 'test.csv'
+    args.direct_url = 'https://example.com/data.csv'
+
     # Call the function
     cli.run_download(args)
-    
+
     # Check that all the expected functions were called
     mock_download.assert_called_once_with(
         output_dir='test/output',
-        id='12345',
-        filename='test.zip',
-        direct_url='https://example.com/data.zip'
-    )
-    mock_extract.assert_called_once_with(
-        zip_path='test/path/to/zip',
-        output_dir='test/output'
+        filename='test.csv',
+        direct_url='https://example.com/data.csv'
     )
 
 
 @patch('excog_trajectory.cli.parse_args')
-@patch('excog_trajectory.cli.run_analysis')
+@patch('excog_trajectory.cli.clean_data')
 @patch('excog_trajectory.cli.run_download')
-def test_main_analyze(mock_run_download, mock_run_analysis, mock_parse_args):
-    """Test that main correctly calls run_analysis for the analyze command."""
+def test_main_clean(mock_run_download, mock_clean_data, mock_parse_args):
+    """Test that main correctly calls clean_data for the clean command."""
     # Setup mock return value
     args = MagicMock()
-    args.command = 'analyze'
+    args.command = 'clean'
     mock_parse_args.return_value = args
-    
+
     # Call the function
     cli.main()
-    
-    # Check that run_analysis was called with the args
-    mock_run_analysis.assert_called_once_with(args)
+
+    # Check that clean_data was called with the args
+    mock_clean_data.assert_called_once_with(args)
     mock_run_download.assert_not_called()
 
 
 @patch('excog_trajectory.cli.parse_args')
-@patch('excog_trajectory.cli.run_analysis')
+@patch('excog_trajectory.cli.clean_data')
 @patch('excog_trajectory.cli.run_download')
-def test_main_download(mock_run_download, mock_run_analysis, mock_parse_args):
+def test_main_download(mock_run_download, mock_clean_data, mock_parse_args):
     """Test that main correctly calls run_download for the download command."""
     # Setup mock return value
     args = MagicMock()
     args.command = 'download'
     mock_parse_args.return_value = args
-    
+
     # Call the function
     cli.main()
-    
+
     # Check that run_download was called with the args
     mock_run_download.assert_called_once_with(args)
-    mock_run_analysis.assert_not_called()
+    mock_clean_data.assert_not_called()
 
 
 @patch('excog_trajectory.cli.parse_args')
-@patch('excog_trajectory.cli.run_analysis')
+@patch('excog_trajectory.cli.clean_data')
 @patch('excog_trajectory.cli.run_download')
 @patch('sys.exit')
-def test_main_unknown_command(mock_exit, mock_run_download, mock_run_analysis, mock_parse_args):
+def test_main_unknown_command(mock_exit, mock_run_download, mock_clean_data, mock_parse_args):
     """Test that main exits for an unknown command."""
     # Setup mock return value
     args = MagicMock()
     args.command = 'unknown'
     mock_parse_args.return_value = args
-    
+
     # Call the function
     cli.main()
-    
+
     # Check that sys.exit was called with code 1
     mock_exit.assert_called_once_with(1)
-    mock_run_analysis.assert_not_called()
+    mock_clean_data.assert_not_called()
     mock_run_download.assert_not_called()
