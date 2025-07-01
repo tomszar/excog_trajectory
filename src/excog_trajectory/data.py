@@ -447,7 +447,7 @@ def apply_qc_rules(
     4. Remove variables with 100% missing data in at least one survey year
 
     These rules are applied to all variables except cognitive and covariate variables.
-    The returned DataFrame will have SEQN, covariates, and cognitive_vars first in the order of columns.
+    The returned DataFrame will have sample, covariates, and cognitive_vars first in the order of columns.
 
     Parameters
     ----------
@@ -465,16 +465,16 @@ def apply_qc_rules(
     Returns
     -------
     pd.DataFrame
-        DataFrame with variables that passed QC rules, with SEQN, covariates, and cognitive_vars first
+        DataFrame with variables that passed QC rules, with sample, covariates, and cognitive_vars first
     """
     # Create a copy of the data to avoid modifying the original
     data_qc = data.copy()
 
-    # Ensure SEQN is included in the variables to keep
-    seqn_var = ["SEQN"] if "SEQN" in data.columns else []
+    # Ensure sample is included in the variables to keep
+    sample_var = ["sample"] if "sample" in data.columns else []
 
     # Identify variables to exclude from QC rules
-    excluded_vars = seqn_var + cognitive_vars + covariates
+    excluded_vars = sample_var + cognitive_vars + covariates
 
     # Get all variables that are not excluded
     all_vars = set(data.columns)
@@ -537,7 +537,7 @@ def apply_qc_rules(
 
     # Apply Rule 4: Remove variables with 100% missing data in at least one survey year
     # Check if SDDSRVYR column exists in the data
-    if 'SDDSRVYR' in data.columns:
+    if 'SDDSRVYR' or 'Cycle' in data.columns:
         # Get percentage of missing data by survey year
         missing_by_year = get_percentage_missing(data)
 
@@ -574,9 +574,9 @@ def apply_qc_rules(
     print(f"Variables remaining: {len(vars_passing_qc) + len(excluded_vars)} out of {len(all_vars)}")
 
     # Use the filter_variables function to get the final dataset
-    # First, order the variables: covariates and cognitive_vars first, then the rest
+    # First, order the variables: sample, covariates and cognitive_vars first, then the rest
     ordered_vars = []
-    ordered_vars.extend(seqn_var)
+    ordered_vars.extend(sample_var)
     ordered_vars.extend(covariates)
     ordered_vars.extend(cognitive_vars)
 
@@ -693,7 +693,7 @@ def impute_exposure_variables(
         n_imputations: int = 5,
         random_state: int = 42,
         n_random_vars: Optional[int] = None,
-        n_iterations: int = 3,
+        n_iterations: int = 5,
         tune_parameters: bool = True,
         save_kernel: bool = False,
         load_kernel: Optional[str] = None,
@@ -722,7 +722,7 @@ def impute_exposure_variables(
     n_random_vars : Optional[int], optional
         Number of random variables to select for imputation. If None, all variables are used, by default None
     n_iterations : int, optional
-        Number of iterations for the imputation procedure, by default 3
+        Number of iterations for the imputation procedure, by default 5
     tune_parameters : bool
         Whether to tune the imputation parameters using gradient boosting decision trees (GBDT), by default True.
     save_kernel: bool
@@ -750,16 +750,21 @@ def impute_exposure_variables(
         print(f"Loading cleaned NHANES data from {data_path}...")
         data = pd.read_csv(data_path, index_col=0).reset_index()
 
-        # Store SEQN separately if it exists in the data
-        seqn_data = None
-        if 'SEQN' in data.columns:
-            seqn_data = data['SEQN'].copy()
-            print("SEQN column found and will be preserved but not used in imputation")
+        # Store sample and Cycle separately if they exist in the data
+        sample_data = None
+        cycle_data = None
+        if 'sample' in data.columns:
+            sample_data = data['sample'].copy()
+            print("sample column found and will be preserved but not used in imputation")
 
-        demographic_vars = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic",
-                            "other_eth", "SES_LEVEL", "education", "SDDSRVYR", "CFDRIGHT"]
-        # Exclude SEQN from exposure variables
-        exposure_vars = [col for col in data.columns if col not in demographic_vars and col != 'SEQN']
+        if 'Cycle' in data.columns:
+            cycle_data = data['Cycle'].copy()
+            print("Cycle column found and will be preserved but not used in imputation")
+
+        demographic_vars = ["RIDAGEYR", "RIAGENDR", "INDFMPIR",
+                            "DMDEDUC2", "RIDRETH1"]
+        # Exclude sample and Cycle from exposure variables
+        exposure_vars = [col for col in data.columns if col not in demographic_vars and col != 'sample' and col != 'Cycle']
 
         print(f"Identified {len(exposure_vars)} exposure variables")
 
@@ -771,7 +776,7 @@ def impute_exposure_variables(
             exposure_vars = np.random.choice(exposure_vars, size=n_random_vars, replace=False).tolist()
             print(f"Randomly selected {len(exposure_vars)} variables for imputation")
 
-        # Create a copy of the data for imputation, excluding SEQN
+        # Create a copy of the data for imputation, excluding sample and Cycle
         to_impute = data.loc[:, demographic_vars + exposure_vars].copy()
 
         # Create a dataset for miceforest
@@ -822,12 +827,23 @@ def impute_exposure_variables(
         dataset_num = i + 1
         imputed_dataset = kernel.complete_data(dataset=i)
 
-        # Add SEQN back to the imputed dataset if it was stored
-        if seqn_data is not None:
-            imputed_dataset['SEQN'] = seqn_data.values
-            # Reorder columns to put SEQN first
-            cols = ['SEQN'] + [col for col in imputed_dataset.columns if col != 'SEQN']
-            imputed_dataset = imputed_dataset[cols]
+        # Add sample and Cycle back to the imputed dataset if they were stored
+        cols = []
+
+        # Add sample back if it was stored
+        if sample_data is not None:
+            imputed_dataset['sample'] = sample_data.values
+            cols.append('sample')
+
+        # Add Cycle back if it was stored
+        if cycle_data is not None:
+            imputed_dataset['Cycle'] = cycle_data.values
+            cols.append('Cycle')
+
+        # Reorder columns to put sample and Cycle first
+        if cols:
+            remaining_cols = [col for col in imputed_dataset.columns if col not in cols]
+            imputed_dataset = imputed_dataset[cols + remaining_cols]
 
         # Save the dataset with appropriate name
         filename = "imputed_nhanes_dat" + str(dataset_num) + ".csv"

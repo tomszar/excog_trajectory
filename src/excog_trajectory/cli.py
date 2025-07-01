@@ -183,7 +183,7 @@ def parse_args():
     impute_parser.add_argument(
         "--n-iterations",
         type=int,
-        default=3,
+        default=5,
         help="Number of iterations for the imputation procedure",
     )
     impute_parser.add_argument(
@@ -436,7 +436,7 @@ def run_imputation(args):
         # Create correlation matrix
         print(f"Creating correlation matrix for dataset {dataset_num}...")
         visualization.plot_exposure_correlation_matrix(
-            data=imputed_data,
+            data=imputed_data.drop(columns=["sample", "Cycle"]),
             fname=os.path.join(correlation_output_dir, f"exposure_correlation_matrix_dataset{dataset_num}.png"),
             dpi=300,
         )
