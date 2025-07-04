@@ -136,8 +136,9 @@ def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
     Parameters
     ----------
     data : pd.DataFrame
-        DataFrame to check for missing values. Should contain either a 'SDDSRVYR' or 'Cycle' column.
-        If neither is present, will calculate overall missing percentages.
+        DataFrame to check for missing values. Should contain either a 'SDDSRVYR', 'Cycle' column,
+        or columns starting with 'Cycle_' (dummy variables for cycles).
+        If none of these are present, will calculate overall missing percentages.
 
     Returns
     -------
@@ -149,6 +150,9 @@ def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
     # Initialize an empty list to store results
     results = []
 
+    # Check for columns that start with 'Cycle_' (dummy variables)
+    cycle_dummy_cols = [col for col in data.columns if col.startswith('Cycle_')]
+
     # Determine which column to use for grouping
     if 'SDDSRVYR' in data.columns:
         group_col = 'SDDSRVYR'
@@ -156,8 +160,12 @@ def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
     elif 'Cycle' in data.columns:
         group_col = 'Cycle'
         group_name = 'cycle'
+    elif cycle_dummy_cols:
+        # Use dummy cycle variables for grouping
+        group_col = 'cycle_dummy'
+        group_name = 'cycle'
     else:
-        # If neither column exists, calculate overall missing percentages
+        # If no grouping columns exist, calculate overall missing percentages
         total_rows = len(data)
         for col in data.columns:
             missing_percentage = (data[col].isna().sum() / total_rows) * 100
@@ -171,27 +179,54 @@ def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
         df = df.sort_values('percentage_missing', ascending=False)
         return df
 
-    # Get unique group values
-    group_values = data[group_col].unique()
+    # Handle the case where cycle is represented by dummy variables
+    if group_col == 'cycle_dummy':
+        # For each dummy cycle column, calculate the percentage of missing values for each column
+        for cycle_col in cycle_dummy_cols:
+            # Extract the cycle category from the column name (e.g., 'Cycle_A' -> 'A')
+            cycle_category = cycle_col.replace('Cycle_', '')
 
-    # For each group value, calculate the percentage of missing values for each column
-    for value in group_values:
-        # Filter data for the current group value
-        group_data = data[data[group_col] == value]
+            # Filter data for rows where this cycle dummy is True
+            group_data = data[data[cycle_col] == True]
 
-        # Get the total number of rows for this group
-        total_rows = len(group_data)
+            # Get the total number of rows for this group
+            total_rows = len(group_data)
 
-        # Calculate the percentage of missing values for each column
-        for col in data.columns:
-            missing_percentage = (group_data[col].isna().sum() / total_rows) * 100
+            if total_rows > 0:  # Only proceed if there are rows in this group
+                # Calculate the percentage of missing values for each column
+                for col in data.columns:
+                    # Skip the cycle dummy columns in the calculation
+                    if col not in cycle_dummy_cols:
+                        missing_percentage = (group_data[col].isna().sum() / total_rows) * 100
 
-            # Add the result to our list
-            results.append({
-                group_name: value,
-                'column_name': col,
-                'percentage_missing': missing_percentage
-            })
+                        # Add the result to our list
+                        results.append({
+                            group_name: cycle_category,
+                            'column_name': col,
+                            'percentage_missing': missing_percentage
+                        })
+    else:
+        # Get unique group values for non-dummy variable case
+        group_values = data[group_col].unique()
+
+        # For each group value, calculate the percentage of missing values for each column
+        for value in group_values:
+            # Filter data for the current group value
+            group_data = data[data[group_col] == value]
+
+            # Get the total number of rows for this group
+            total_rows = len(group_data)
+
+            # Calculate the percentage of missing values for each column
+            for col in data.columns:
+                missing_percentage = (group_data[col].isna().sum() / total_rows) * 100
+
+                # Add the result to our list
+                results.append({
+                    group_name: value,
+                    'column_name': col,
+                    'percentage_missing': missing_percentage
+                })
 
     # Convert the list of dictionaries to a DataFrame
     long_df = pd.DataFrame(results)
@@ -469,12 +504,34 @@ def apply_qc_rules(
     """
     # Create a copy of the data to avoid modifying the original
     data_qc = data.copy()
+    extended_covs = covariates.copy()
+
+    # Transform categorical covariates into dummy variables
+    # The columns we need to transform are Cycle, RIAGENDR, and RIDRETH1
+    categorical_covariates = ["Cycle", "RIAGENDR", "RIDRETH1"]
+
+    # Check which categorical covariates are present in the data
+    categorical_covariates_present = [col for col in categorical_covariates if col in data_qc.columns]
+
+    if categorical_covariates_present:
+        print(f"Transforming categorical covariates into dummy variables: {categorical_covariates_present}")
+
+        # Create dummy variables for each categorical covariate and add them to
+        # the covariates list
+        dummies = pd.get_dummies(data_qc,
+                                 prefix=categorical_covariates_present,
+                                 drop_first=False,
+                                 dtype=int,
+                                 columns=categorical_covariates_present)
+        new_vars = [col for col in dummies.columns.to_list() if col not in data_qc.columns.to_list()]
+        extended_covs.extend(new_vars)
+        data_qc = dummies
 
     # Ensure sample is included in the variables to keep
     sample_var = ["sample"] if "sample" in data.columns else []
 
     # Identify variables to exclude from QC rules
-    excluded_vars = sample_var + cognitive_vars + covariates
+    excluded_vars = sample_var + cognitive_vars + extended_covs
 
     # Get all variables that are not excluded
     all_vars = set(data.columns)
@@ -577,7 +634,7 @@ def apply_qc_rules(
     # First, order the variables: sample, covariates and cognitive_vars first, then the rest
     ordered_vars = []
     ordered_vars.extend(sample_var)
-    ordered_vars.extend(covariates)
+    ordered_vars.extend(extended_covs)
     ordered_vars.extend(cognitive_vars)
 
     if log2_transform:

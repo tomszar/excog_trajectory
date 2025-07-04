@@ -11,7 +11,7 @@ import os
 
 import pandas as pd
 
-from excog_trajectory import data, visualization
+from excog_trajectory import analysis, data, visualization
 
 
 def parse_args():
@@ -35,7 +35,7 @@ def parse_args():
     plsr_parser.add_argument(
         "--data-path",
         type=str,
-        default="data/processed/imputed_nhanes_dat1.csv",
+        default="data/processed/combined/imputed_nhanes_dat1.csv",
         help="Path to the imputed NHANES dataset",
     )
     plsr_parser.add_argument(
@@ -250,8 +250,10 @@ def clean_data(args):
     print("Applying QC rules to each dataset separately...")
     for dat in nhanes_data:
         print(f"Applying QC rules to {dat}...")
-        nhanes_data[dat] = data.apply_qc_rules(nhanes_data[dat], cognitive_vars,
-                                               covariates, standardize=True,
+        nhanes_data[dat] = data.apply_qc_rules(nhanes_data[dat],
+                                               cognitive_vars,
+                                               covariates=covariates,
+                                               standardize=True,
                                                log2_transform=True)
 
         # Save the individual cleaned datasets
@@ -270,7 +272,15 @@ def clean_data(args):
 
         # Create correlation matrix of exposure variables for each individual dataset
         print(f"Creating correlation matrix of exposure variables for {dat}...")
-        exposure_vars = [col for col in nhanes_data[dat].columns if col not in cognitive_vars + covariates]
+        # Exclude original covariates and dummy variables created from categorical covariates
+        categorical_covariates = ["Cycle", "RIAGENDR", "RIDRETH1"]
+        dummy_prefixes = [f"{cov}_" for cov in categorical_covariates]
+
+        # Filter out covariates and any column that starts with dummy variable prefixes
+        exposure_vars = [col for col in nhanes_data[dat].columns 
+                        if col not in cognitive_vars + covariates and 
+                        not any(col.startswith(prefix) for prefix in dummy_prefixes)]
+
         visualization.plot_exposure_correlation_matrix(
             data=nhanes_data[dat][exposure_vars],
             fname=os.path.join(args.output_dir, f"exposure_correlation_matrix_{dat}.png"),
@@ -317,20 +327,46 @@ def clean_data(args):
 
     # Filter columns in the combined dataset to keep only those with at least one observation in each Cycle
     print("Filtering columns to keep those with at least one observation in each Cycle...")
-    # Group by Cycle and check for observations in each column
-    cycles = combined_data['Cycle'].unique()
-    columns_to_keep = []
 
-    for column in combined_data.columns:
-        has_observation_in_all_cycles = True
-        for cycle in cycles:
-            cycle_data = combined_data[combined_data['Cycle'] == cycle]
-            if cycle_data[column].isna().all():  # Check if ALL values are missing in this cycle
-                has_observation_in_all_cycles = False
-                break
+    # Check if we have the original 'Cycle' column or dummy variables
+    cycle_dummy_cols = [col for col in combined_data.columns if col.startswith('Cycle_')]
 
-        if has_observation_in_all_cycles:
-            columns_to_keep.append(column)
+    if 'Cycle' in combined_data.columns:
+        # Original Cycle column exists, use it for grouping
+        print("Using original Cycle column for filtering...")
+        cycles = combined_data['Cycle'].unique()
+        columns_to_keep = []
+
+        for column in combined_data.columns:
+            has_observation_in_all_cycles = True
+            for cycle in cycles:
+                cycle_data = combined_data[combined_data['Cycle'] == cycle]
+                if cycle_data[column].isna().all():  # Check if ALL values are missing in this cycle
+                    has_observation_in_all_cycles = False
+                    break
+
+            if has_observation_in_all_cycles:
+                columns_to_keep.append(column)
+    elif cycle_dummy_cols:
+        # Cycle has been converted to dummy variables, use them for grouping
+        print(f"Using Cycle dummy variables for filtering: {cycle_dummy_cols}")
+        columns_to_keep = []
+
+        for column in combined_data.columns:
+            has_observation_in_all_cycles = True
+            for cycle_col in cycle_dummy_cols:
+                cycle_data = combined_data[combined_data[cycle_col] == True]
+                # Check if there's at least one non-NaN value in this cycle for this column
+                if len(cycle_data) > 0 and not cycle_data[column].notna().any():
+                    has_observation_in_all_cycles = False
+                    break
+
+            if has_observation_in_all_cycles:
+                columns_to_keep.append(column)
+    else:
+        # No Cycle information available, keep all columns
+        print("Warning: No Cycle column or dummy variables found. Keeping all columns.")
+        columns_to_keep = combined_data.columns.tolist()
 
     # Keep only columns with at least one observation in each Cycle
     combined_data = combined_data[columns_to_keep]
@@ -360,7 +396,14 @@ def clean_data(args):
     # Create correlation matrix of exposure variables for the combined dataset
     print("Creating correlation matrix of exposure variables for combined dataset...")
     # Since we don't have description data, we'll use all columns except cognitive and covariates
-    exposure_vars = [col for col in combined_data.columns if col not in cognitive_vars + covariates]
+    # Exclude original covariates and dummy variables created from categorical covariates
+    categorical_covariates = ["Cycle", "RIAGENDR", "RIDRETH1"]
+    dummy_prefixes = [f"{cov}_" for cov in categorical_covariates]
+
+    # Filter out covariates and any column that starts with dummy variable prefixes
+    exposure_vars = [col for col in combined_data.columns 
+                    if col not in cognitive_vars + covariates and 
+                    not any(col.startswith(prefix) for prefix in dummy_prefixes)]
     visualization.plot_exposure_correlation_matrix(
         data=combined_data[exposure_vars],
         fname=os.path.join(args.output_dir, "exposure_correlation_matrix.png"),
@@ -451,19 +494,17 @@ def run_plsr_analysis(args):
     data_df = pd.read_csv(args.data_path)
 
     # Define variables for analysis
-    cognitive_vars = ["CFDRIGHT"]  # Cognitive function right responses
-    covariates = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic", "other_eth", "SES_LEVEL",
-                  "education", "SDDSRVYR"]  # Demographics and survey cycle
-
+    cognitive_vars = ["CFDDS"]  # Cognitive function right responses
+    covariates = ["Cycle", "RIDAGEYR", "RIAGENDR", "INDFMPIR",
+                  "DMDEDUC2", "RIDRETH1"]  # Demographics and survey cycle
     # Identify exposure variables (all variables that are not cognitive or covariates)
     all_vars = set(data_df.columns)
-    non_exposure_vars = set(cognitive_vars + covariates + ["SEQN"])
+    non_exposure_vars = set(cognitive_vars + covariates)
     exposure_vars = list(all_vars - non_exposure_vars)
+    x = data_df[exposure_vars + covariates].drop(columns=["Cycle"])
+    y = data_df[cognitive_vars]
 
     print(f"Running PLSR with {len(exposure_vars)} exposure variables, {len(cognitive_vars)} cognitive variables, and {len(covariates)} covariates...")
-
-    # Run PLSR with cross-validation (always enabled)
-    from excog_trajectory import analysis
 
     if args.n_repetitions > 1:
         print(
@@ -471,230 +512,30 @@ def run_plsr_analysis(args):
     else:
         print(
             f"Running PLSR with double cross-validation ({args.outer_folds} outer folds, {args.inner_folds} inner folds)...")
-    n_components_range = list(range(1, args.max_components + 1))
-    plsr_results = analysis.run_plsr_cv(
-        data=data_df,
-        exposure_vars=exposure_vars,
-        cognitive_vars=cognitive_vars,
-        covariates=covariates,
-        n_components_range=n_components_range,
-        outer_folds=args.outer_folds,
-        inner_folds=args.inner_folds,
-        scale=args.scale,
-        n_repetitions=args.n_repetitions,
+
+    plsr_results = analysis.pls_double_cv(
+        x=x,
+        y=y,
+        n_repeats=args.n_repetitions,
+        max_components=args.max_components,
     )
 
     # Print information about the final model
-    if 'final_best_n_components' in plsr_results:
-        final_best_n_comp = plsr_results['final_best_n_components']
-        print(f"\nFinal best number of components: {final_best_n_comp}")
-        print(f"A final model has been trained on the entire dataset using {final_best_n_comp} components.")
+    mode = int(plsr_results['table']['LV'].mode()[0])
+    print(f"\nThe most repeated number of LV: {str(mode)}")
+    from sklearn.cross_decomposition import PLSRegression
+    best_model = PLSRegression(
+        n_components=mode, scale=True, max_iter=1000).fit(
+        X=x, y=y
+    )
+    print(f"A final model has been trained on the entire dataset using {str(mode)} components.")
 
     # Save the results
     import pickle
-    with open(os.path.join(args.output_dir, "plsr_results.pkl"), "wb") as f:
-        pickle.dump(plsr_results, f)
+    with open(os.path.join(args.output_dir, "best_model.pkl"), "wb") as f:
+        pickle.dump(best_model, f)
 
-    print(f"PLSR results saved to {os.path.join(args.output_dir, 'plsr_results.pkl')}")
-
-    # Create visualizations
-    import matplotlib.pyplot as plt
-    import numpy as np
-    from sklearn.preprocessing import StandardScaler
-
-    # Visualizations for cross-validation results
-
-    # Plot distribution of best number of components
-    plt.figure(figsize=(10, 6))
-    best_components = plsr_results["best_n_components"]
-    unique_components = sorted(set(best_components))
-    counts = [best_components.count(comp) for comp in unique_components]
-    plt.bar(unique_components, counts)
-    plt.xlabel('Number of Components')
-    plt.ylabel('Frequency')
-
-    # Update title to reflect multiple repetitions if applicable
-    if args.n_repetitions > 1:
-        plt.title(
-            f'Distribution of Optimal Number of Components Across {args.outer_folds} Outer Folds × {args.n_repetitions} Repetitions')
-    else:
-        plt.title('Distribution of Optimal Number of Components Across Outer Folds')
-
-    plt.xticks(unique_components)
-    plt.tight_layout()
-    plt.savefig(os.path.join(args.output_dir, "plsr_cv_best_components.png"), dpi=300)
-
-    # Highlight the final best number of components
-    final_best_n_comp = plsr_results["final_best_n_components"]
-    plt.figure(figsize=(10, 6))
-    plt.bar(unique_components, counts,
-            color=['blue' if comp != final_best_n_comp else 'red' for comp in unique_components])
-    plt.xlabel('Number of Components')
-    plt.ylabel('Frequency')
-    plt.title(f'Final Best Number of Components: {final_best_n_comp}')
-    plt.xticks(unique_components)
-    plt.tight_layout()
-    plt.savefig(os.path.join(args.output_dir, "plsr_cv_final_best_component.png"), dpi=300)
-
-    # Plot outer fold AUROC scores
-    plt.figure(figsize=(10, 6))
-    outer_scores = plsr_results["outer_scores"]
-
-    # If using multiple repetitions, we need to reshape the scores
-    if args.n_repetitions > 1 and 'repetition_best_components' in plsr_results:
-        # Calculate the number of outer folds
-        n_outer_folds = len(plsr_results['repetition_best_components'][0])
-
-        # Reshape the scores to get scores for each fold across repetitions
-        reshaped_scores = np.array(outer_scores).reshape(args.n_repetitions, n_outer_folds)
-
-        # Calculate mean and std for each fold across repetitions
-        mean_scores = np.mean(reshaped_scores, axis=0)
-        std_scores = np.std(reshaped_scores, axis=0)
-
-        # Plot with error bars
-        plt.bar(range(1, n_outer_folds + 1), mean_scores, yerr=std_scores, capsize=5)
-        plt.axhline(y=np.mean(mean_scores), color='r', linestyle='-',
-                    label=f'Mean AUROC: {np.mean(mean_scores):.3f}')
-        plt.xlabel('Outer Fold')
-        plt.ylabel('Mean AUROC Score (across repetitions)')
-        plt.title(f'Mean AUROC Scores Across Outer Folds ({args.n_repetitions} Repetitions)')
-        plt.xticks(range(1, n_outer_folds + 1))
-    else:
-        # Original plot for single repetition
-        plt.bar(range(1, len(outer_scores) + 1), outer_scores)
-        plt.axhline(y=np.mean(outer_scores), color='r', linestyle='-',
-                    label=f'Mean AUROC: {np.mean(outer_scores):.3f}')
-        plt.xlabel('Outer Fold')
-        plt.ylabel('AUROC Score')
-        plt.title('AUROC Scores Across Outer Folds')
-        plt.xticks(range(1, len(outer_scores) + 1))
-
-    plt.ylim(0, 1)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(os.path.join(args.output_dir, "plsr_cv_outer_scores.png"), dpi=300)
-
-    # Plot inner fold AUROC scores for each number of components
-    plt.figure(figsize=(12, 8))
-    n_components_range = plsr_results["n_components_range"]
-    inner_scores = plsr_results["inner_scores"]
-
-    # Calculate mean scores for each number of components
-    mean_scores = [np.mean(inner_scores[n_comp]) for n_comp in n_components_range]
-    std_scores = [np.std(inner_scores[n_comp]) for n_comp in n_components_range]
-
-    plt.errorbar(n_components_range, mean_scores, yerr=std_scores, fmt='o-', capsize=5)
-    plt.xlabel('Number of Components')
-    plt.ylabel('Mean AUROC Score')
-    plt.title('Mean AUROC Scores Across Inner Folds by Number of Components')
-    plt.xticks(n_components_range)
-    plt.ylim(0, 1)
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.tight_layout()
-    plt.savefig(os.path.join(args.output_dir, "plsr_cv_inner_scores.png"), dpi=300)
-
-    # If there are multiple models (one per outer fold), we can visualize the loadings of the first component
-    # from the model with the best performance on the outer test fold
-    if plsr_results["models"]:
-        best_model_idx = np.argmax(plsr_results["outer_scores"])
-        best_model = plsr_results["models"][best_model_idx]
-
-        # Plot X loadings for the best model from cross-validation
-        plt.figure(figsize=(12, 8))
-        x_loadings = best_model.x_loadings_
-        x_vars = plsr_results["X_vars"]
-
-        # Limit to top 20 variables by absolute loading value for readability
-        if len(x_vars) > 20:
-            # Get indices of top 20 variables by absolute loading value
-            top_indices = np.argsort(np.abs(x_loadings[:, 0]))[-20:]
-            x_loadings = x_loadings[top_indices, :]
-            x_vars = [x_vars[i] for i in top_indices]
-
-        plt.barh(range(len(x_vars)), x_loadings[:, 0], align='center')
-        plt.yticks(range(len(x_vars)), x_vars)
-        plt.xlabel('Component 1 Loading')
-        plt.title(f'PLSR X Loadings (Component 1) - Best Model from Fold {best_model_idx + 1}')
-        plt.tight_layout()
-        plt.savefig(os.path.join(args.output_dir, "plsr_cv_best_model_x_loadings.png"), dpi=300)
-
-        # Plot Y loadings for the best model from cross-validation
-        plt.figure(figsize=(12, 8))
-        y_loadings = best_model.y_loadings_
-        y_vars = plsr_results["Y_vars"]
-
-        plt.barh(range(len(y_vars)), y_loadings[:, 0], align='center')
-        plt.yticks(range(len(y_vars)), y_vars)
-        plt.xlabel('Component 1 Loading')
-        plt.title(f'PLSR Y Loadings (Component 1) - Best Model from Fold {best_model_idx + 1}')
-        plt.tight_layout()
-        plt.savefig(os.path.join(args.output_dir, "plsr_cv_best_model_y_loadings.png"), dpi=300)
-
-    # Visualize the final model trained on the entire dataset
-    if 'final_model' in plsr_results:
-        final_model = plsr_results['final_model']
-        final_best_n_comp = plsr_results['final_best_n_components']
-
-        # Plot X loadings for the final model
-        plt.figure(figsize=(12, 8))
-        x_loadings = final_model.x_loadings_
-        x_vars = plsr_results["X_vars"]
-
-        # Limit to top 20 variables by absolute loading value for readability
-        if len(x_vars) > 20:
-            # Get indices of top 20 variables by absolute loading value
-            top_indices = np.argsort(np.abs(x_loadings[:, 0]))[-20:]
-            x_loadings = x_loadings[top_indices, :]
-            x_vars = [x_vars[i] for i in top_indices]
-
-        plt.barh(range(len(x_vars)), x_loadings[:, 0], align='center')
-        plt.yticks(range(len(x_vars)), x_vars)
-        plt.xlabel('Component 1 Loading')
-        plt.title(f'PLSR X Loadings (Component 1) - Final Model with {final_best_n_comp} Components')
-        plt.tight_layout()
-        plt.savefig(os.path.join(args.output_dir, "plsr_cv_final_model_x_loadings.png"), dpi=300)
-
-        # Plot Y loadings for the final model
-        plt.figure(figsize=(12, 8))
-        y_loadings = final_model.y_loadings_
-        y_vars = plsr_results["Y_vars"]
-
-        plt.barh(range(len(y_vars)), y_loadings[:, 0], align='center')
-        plt.yticks(range(len(y_vars)), y_vars)
-        plt.xlabel('Component 1 Loading')
-        plt.title(f'PLSR Y Loadings (Component 1) - Final Model with {final_best_n_comp} Components')
-        plt.tight_layout()
-        plt.savefig(os.path.join(args.output_dir, "plsr_cv_final_model_y_loadings.png"), dpi=300)
-
-        # If there are multiple components, visualize the explained variance
-        if final_best_n_comp > 1:
-            # Calculate explained variance for the final model
-            X = data_df[plsr_results["X_vars"]].values
-            Y = data_df[plsr_results["Y_vars"]].values
-
-            if args.scale:
-                X = StandardScaler().fit_transform(X)
-                Y = StandardScaler().fit_transform(Y)
-
-            X_scores = final_model.transform(X)
-            Y_scores = final_model.y_scores_
-
-            x_explained_variance = np.var(X_scores, axis=0) / np.var(X, axis=0).sum()
-            y_explained_variance = np.var(Y_scores, axis=0) / np.var(Y, axis=0).sum()
-
-            plt.figure(figsize=(10, 6))
-            components = range(1, final_best_n_comp + 1)
-            plt.bar(components, x_explained_variance, alpha=0.7, label='X Variance')
-            plt.bar(components, y_explained_variance, alpha=0.7, label='Y Variance')
-            plt.xlabel('Component')
-            plt.ylabel('Explained Variance Ratio')
-            plt.title(f'PLSR Explained Variance by Component - Final Model with {final_best_n_comp} Components')
-            plt.legend()
-            plt.tight_layout()
-            plt.savefig(os.path.join(args.output_dir, "plsr_cv_final_model_explained_variance.png"), dpi=300)
-
-    print(f"PLSR visualizations saved to {args.output_dir}")
+    print(f"PLSR results saved to {os.path.join(args.output_dir, 'best_model.pkl')}")
     print("PLSR analysis complete!")
 
 

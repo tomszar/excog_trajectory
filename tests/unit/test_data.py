@@ -551,6 +551,7 @@ def test_apply_qc_rules():
     # - mostly_zeros: a variable with 90% of non-NaN values equal to zero (Rule 3)
     # - missing_in_year: a variable with 100% missing data in one survey year (Rule 4)
     # - keep_var: a variable that should pass all QC rules
+    # - Cycle, RIAGENDR, RIDRETH1: categorical covariates that should be transformed into dummy variables
 
     # Create the test data
     import numpy as np
@@ -592,9 +593,14 @@ def test_apply_qc_rules():
     # Variable that should pass all QC rules
     test_data["keep_var"] = np.random.normal(10, 2, n_rows)
 
+    # Add categorical covariates that should be transformed into dummy variables
+    test_data["Cycle"] = np.concatenate([np.ones(100), np.ones(100) * 2, np.ones(100) * 3])  # 3 cycles
+    test_data["RIAGENDR"] = np.random.choice([1, 2], n_rows)  # 1=Male, 2=Female
+    test_data["RIDRETH1"] = np.random.choice([1, 2, 3, 4, 5], n_rows)  # 5 ethnicity categories
+
     # Define cognitive and covariate variables
     cognitive_vars = ["cognitive_var"]
-    covariates = ["covariate_var"]
+    covariates = ["covariate_var", "Cycle", "RIAGENDR", "RIDRETH1"]
 
     # Call the function
     with patch('builtins.print'):  # Suppress print statements
@@ -606,6 +612,21 @@ def test_apply_qc_rules():
     # Check that cognitive and covariate variables are preserved
     assert "cognitive_var" in result.columns
     assert "covariate_var" in result.columns
+    assert "Cycle" in result.columns
+    assert "RIAGENDR" in result.columns
+    assert "RIDRETH1" in result.columns
+
+    # Check that dummy variables were created for categorical covariates
+    assert "Cycle_1.0" in result.columns
+    assert "Cycle_2.0" in result.columns
+    assert "Cycle_3.0" in result.columns
+    assert "RIAGENDR_1" in result.columns
+    assert "RIAGENDR_2" in result.columns
+    assert "RIDRETH1_1" in result.columns
+    assert "RIDRETH1_2" in result.columns
+    assert "RIDRETH1_3" in result.columns
+    assert "RIDRETH1_4" in result.columns
+    assert "RIDRETH1_5" in result.columns
 
     # Check that variables that should be removed are not in the result
     assert "few_non_nan" not in result.columns  # Rule 1
@@ -623,4 +644,8 @@ def test_apply_qc_rules():
     assert "missing_in_year" in test_data.columns
 
     # Check that SEQN, covariates, and cognitive_vars are first in the order of columns
-    assert list(result.columns)[:3] == ["SEQN", "covariate_var", "cognitive_var"]
+    # Note: The order might be different now due to the added dummy variables
+    first_columns = list(result.columns)[:6]
+    assert "SEQN" in first_columns
+    assert "covariate_var" in first_columns
+    assert "cognitive_var" in first_columns

@@ -5,238 +5,171 @@ This module provides statistical methods and modeling approaches for analyzing
 the associations between environmental exposures and cognitive outcomes in NHANES data.
 """
 
-from typing import Dict, List
+import multiprocessing
+from itertools import repeat
+from typing import Dict, List, Union
 
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import pdist, squareform
 from sklearn.cross_decomposition import PLSRegression
-from sklearn.metrics import roc_auc_score
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, RepeatedKFold
 from sklearn.preprocessing import StandardScaler
 
 
-def run_plsr_cv(
-        data: pd.DataFrame,
-        exposure_vars: List[str],
-        cognitive_vars: List[str],
-        covariates: List[str],
-        n_components_range: List[int] = None,
-        outer_folds: int = 8,
-        inner_folds: int = 7,
-        scale: bool = True,
-        random_state: int = 42,
-        n_repetitions: int = 1,
-) -> Dict[str, object]:
+def pls_double_cv(
+        x: pd.DataFrame,
+        y: Union[pd.DataFrame, pd.Series],
+        cv1_splits: int = 7,
+        cv2_splits: int = 8,
+        n_repeats: int = 30,
+        max_components: int = 50,
+        random_state: int = 1203,
+) -> dict[str, Union[PLSRegression, pd.DataFrame]]:
     """
-    Run Partial Least Squares Regression (PLSR) with double cross-validation.
-
-    Uses an outer cross-validation loop to evaluate model performance and an inner
-    cross-validation loop to optimize the number of components by maximizing AUROC.
-    The process is repeated n_repetitions times, and the best model is selected as
-    the most common number of latent variables evaluated in the outer loop.
-    A final model is trained on the entire dataset using this optimal number of components.
+    Estimate a double cross validation on a partial least squares
+    regression.
 
     Parameters
     ----------
-    data : pd.DataFrame
-        DataFrame containing exposure, cognitive, and covariate variables
-    exposure_vars : list of str
-        List of exposure variables to include in the X matrix
-    cognitive_vars : list of str
-        List of cognitive variables to include in the Y matrix
-    covariates : list of str
-        List of covariate variables to include in the X matrix
-    n_components_range : list of int, default=None
-        Range of number of components to try in the inner cross-validation loop.
-        If None, will use [1, 2, 3, 4, 5]
-    outer_folds : int, default=8
-        Number of folds for the outer cross-validation loop
-    inner_folds : int, default=7
-        Number of folds for the inner cross-validation loop
-    scale : bool, default=True
-        Whether to standardize the data before running PLSR
-    random_state : int, default=42
-        Random state for reproducibility
-    n_repetitions : int, default=1
-        Number of times to repeat the double cross-validation process
+    x: pd.DataFrame
+        The predictor variables.
+    y: Union[pd.DataFrame, pd.Series]
+        The outcome variable.
+    cv1_splits: int
+        Number of folds in the CV1 loop. Default: 7.
+    cv2_splits: int
+        Number of folds in the CV2 loop. Default: 8.
+    n_repeats: int
+        Number of repeats to the cv2 procedure. Default: 30.
+    max_components: int
+        Maximum number of LV to test. Default: 50.
+    random_state: int
+        For reproducibility. Default: 1203.
 
     Returns
     -------
-    Dict[str, object]
-        Dictionary containing the cross-validation results, including:
-        - 'best_n_components': List of best number of components for each outer fold across all repetitions
-        - 'outer_scores': AUROC scores for each outer fold across all repetitions
-        - 'inner_scores': AUROC scores for each inner fold and each number of components
-        - 'models': List of fitted PLSR models for each outer fold in the last repetition
-        - 'X_vars': List of X variables used
-        - 'Y_vars': List of Y variables used
-        - 'final_best_n_components': The most common number of components across all outer folds and repetitions
-        - 'final_model': The model trained on the entire dataset using the final best number of components
+    models_table: dict[str,
+                       Union[PLSRegression,
+                             pd.DataFrame]
+        Dictionary with the table of the best models, including repetition,
+        number of latent variables, and R2 score. Also includes the model for
+        prediction.
     """
-    # TODO: check the inner outer loops and what models are saved
-
-    # Create a copy of the data to avoid modifying the original
-    data_plsr = data.copy()
-
-    # Set default range of components if not provided
-    if n_components_range is None:
-        n_components_range = list(range(1, 6))  # [1, 2, 3, 4, 5]
-
-    # Combine exposure variables and covariates for the X matrix
-    X_vars = exposure_vars + covariates
-
-    # Check if all variables exist in the data
-    missing_x_vars = [var for var in X_vars if var not in data_plsr.columns]
-    missing_y_vars = [var for var in cognitive_vars if var not in data_plsr.columns]
-
-    if missing_x_vars:
-        raise ValueError(f"The following X variables are missing from the data: {missing_x_vars}")
-    if missing_y_vars:
-        raise ValueError(f"The following Y variables are missing from the data: {missing_y_vars}")
-
-    # Extract X and Y matrices
-    X = data_plsr[X_vars].values
-    Y = data_plsr[cognitive_vars].values
-
-    # Standardize the data if requested
-    if scale:
-        X_scaler = StandardScaler()
-        Y_scaler = StandardScaler()
-        X = X_scaler.fit_transform(X)
-        Y = Y_scaler.fit_transform(Y)
-
-    # Initialize results dictionary
-    results = {
-        'best_n_components'         : [],
-        'outer_scores'              : [],
-        'inner_scores'              : {n_comp: [] for n_comp in n_components_range},
-        'models'                    : [],
-        'X_vars'                    : X_vars,
-        'Y_vars'                    : cognitive_vars,
-        'repetition_best_components': [],  # Track best components for each repetition
+    cv2 = RepeatedKFold(
+        n_splits=cv2_splits, n_repeats=n_repeats, random_state=random_state
+    )
+    cv1 = KFold(n_splits=cv1_splits)
+    cv2_table = pd.DataFrame(np.zeros((cv2_splits, 2)))
+    cv1_table = pd.DataFrame(np.zeros((cv1_splits, 2)))
+    for_table = {
+        "rep"     : list(range(1, n_repeats + 1)),
+        "LV"      : list(range(1, n_repeats + 1)),
+        "R2_score": [0.1] * n_repeats,
     }
+    model_table = pd.DataFrame(for_table)
+    row_cv2 = 0
+    row_model_table = 0
+    cv2_models = []
+    best_models = []
+    for rest, test in cv2.split(x, y):
+        # Outer CV2 loop split into test and rest
+        x_rest = x.iloc[rest, :]
+        x_test = x.iloc[test, :]
+        y_rest = y.iloc[rest]
+        y_test = y.iloc[test]
+        row_cv1 = 0
+        for train, validation in cv1.split(x_rest, y_rest):
+            # Inner CV validates optimal number of LVs
+            x_train = x_rest.iloc[train, :]
+            y_train = y_rest.iloc[train, :]
+            x_val = x_rest.iloc[validation, :]
+            y_val = y_rest.iloc[validation, :]
+            ns = list(range(1, max_components))
+            with multiprocessing.Pool(processes=None) as pool:
+                r2_scores = pool.starmap(
+                    _plsda_r2,
+                    zip(
+                        ns,
+                        repeat(x_train),
+                        repeat(y_train),
+                        repeat(x_val),
+                        repeat(y_val),
+                    ),
+                )
+            nlv = r2_scores.index(max(r2_scores)) + 1
+            cv1_table.iloc[row_cv1, 0] = nlv
+            cv1_table.iloc[row_cv1, 1] = max(r2_scores)
+            row_cv1 += 1
+        # Get optimal n of components
+        n_components = int(cv1_table.iloc[cv1_table[1].idxmax(), 0])
+        model_score = _plsda_r2(
+            n_components, x_rest, y_rest, x_test, y_test, return_full=True
+        )
+        cv2_table.iloc[row_cv2, 0] = n_components
+        cv2_table.iloc[row_cv2, 1] = model_score["score"]
+        cv2_models.append(model_score["model"])
+        row_cv2 += 1
+        if row_cv2 == cv2_splits:
+            best_cv2_lv = int(cv2_table.iloc[cv2_table[1].idxmax(), 0])
+            r2_val = cv2_table.iloc[cv2_table[1].idxmax(), 1]
+            model_table.iloc[row_model_table, 1] = best_cv2_lv
+            model_table.iloc[row_model_table, 2] = r2_val
+            best_models.append(cv2_models[cv2_table[1].idxmax()])
+            row_model_table += 1
+            cv2_table = pd.DataFrame(np.zeros((cv2_splits, 2)))
+            cv2_models = []
+            row_cv2 = 0
+    models_table = {"models": best_models, "table": model_table}
+    return models_table
 
-    # Repeat the cross-validation process n_repetitions times
-    for rep in range(n_repetitions):
-        # Use a different random state for each repetition
-        rep_random_state = random_state + rep if random_state is not None else None
 
-        # Initialize outer cross-validation
-        outer_cv = KFold(n_splits=outer_folds, shuffle=True, random_state=rep_random_state)
+def _plsda_r2(
+        n_components: int,
+        x_train: pd.DataFrame,
+        y_train: Union[pd.Series, pd.DataFrame],
+        x_test: pd.DataFrame,
+        y_test: Union[pd.Series, pd.DataFrame],
+        return_full: bool = False,
+) -> Union[float, dict[str, Union[PLSRegression, float]]]:
+    """
+    Estimate a partial least squares regression and return the coefficient of
+    determination and the model, or just the coefficient of determination.
 
-        # Store best components for this repetition
-        rep_best_components = []
+    Parameters
+    ----------
+    n_components: int
+        Number of components to use.
+    x_train: pd.DataFrame
+        The predictors to use for training.
+    y_train: Union[pd.Series, pd.DataFrame]
+        The outcome to use for training.
+    x_test: pd.DataFrame,
+        The predictors to use for testing.
+    y_test: Union[pd.Series, pd.DataFrame]
+        The outcomes to use for testing.
+    return_full: bool
+        Whether to return the model and R2 score.
+        If False, returns only the R2 score. Default: False.
 
-        # Outer cross-validation loop
-        for outer_fold, (train_idx, test_idx) in enumerate(outer_cv.split(X)):
-            X_train, X_test = X[train_idx], X[test_idx]
-            Y_train, Y_test = Y[train_idx], Y[test_idx]
-
-            # Initialize inner cross-validation
-            inner_cv = KFold(n_splits=inner_folds, shuffle=True, random_state=rep_random_state)
-
-            # Dictionary to store inner fold scores for each number of components
-            inner_fold_scores = {n_comp: [] for n_comp in n_components_range}
-
-            # Inner cross-validation loop
-            for inner_fold, (inner_train_idx, inner_val_idx) in enumerate(inner_cv.split(X_train)):
-                X_inner_train, X_inner_val = X_train[inner_train_idx], X_train[inner_val_idx]
-                Y_inner_train, Y_inner_val = Y_train[inner_train_idx], Y_train[inner_val_idx]
-
-                # Try different numbers of components
-                for n_comp in n_components_range:
-                    # Fit PLS model
-                    plsr = PLSRegression(n_components=n_comp)
-                    plsr.fit(X_inner_train, Y_inner_train)
-
-                    # Predict on validation set
-                    Y_inner_pred = plsr.predict(X_inner_val)
-
-                    # Calculate AUROC for each cognitive variable and average
-                    auroc_scores = []
-                    for i in range(Y_inner_val.shape[1]):
-                        # Convert predictions to binary for AUROC calculation
-                        # Using median as threshold for simplicity
-                        y_true_binary = (Y_inner_val[:, i] > np.median(Y_inner_val[:, i])).astype(int)
-                        y_pred_score = Y_inner_pred[:, i]
-
-                        try:
-                            auroc = roc_auc_score(y_true_binary, y_pred_score)
-                            auroc_scores.append(auroc)
-                        except ValueError:
-                            # Handle case where all true values are the same class
-                            auroc_scores.append(0.5)  # Random guess
-
-                    # Average AUROC across cognitive variables
-                    mean_auroc = np.mean(auroc_scores)
-                    inner_fold_scores[n_comp].append(mean_auroc)
-
-            # Calculate average AUROC for each number of components across inner folds
-            mean_inner_scores = {n_comp: np.mean(scores) for n_comp, scores in inner_fold_scores.items()}
-
-            # Find the best number of components
-            best_n_comp = max(mean_inner_scores, key=mean_inner_scores.get)
-            results['best_n_components'].append(best_n_comp)
-            rep_best_components.append(best_n_comp)
-
-            # Store inner fold scores (only for the last repetition to save memory)
-            if rep == n_repetitions - 1:
-                for n_comp, scores in inner_fold_scores.items():
-                    results['inner_scores'][n_comp].extend(scores)
-
-            # Train final model with best number of components on all training data
-            best_model = PLSRegression(n_components=best_n_comp)
-            best_model.fit(X_train, Y_train)
-
-            # Only store models from the last repetition to save memory
-            if rep == n_repetitions - 1:
-                results['models'].append(best_model)
-
-            # Evaluate on test set
-            Y_test_pred = best_model.predict(X_test)
-
-            # Calculate AUROC for each cognitive variable and average
-            outer_auroc_scores = []
-            for i in range(Y_test.shape[1]):
-                # Convert predictions to binary for AUROC calculation
-                y_true_binary = (Y_test[:, i] > np.median(Y_test[:, i])).astype(int)
-                y_pred_score = Y_test_pred[:, i]
-
-                try:
-                    auroc = roc_auc_score(y_true_binary, y_pred_score)
-                    outer_auroc_scores.append(auroc)
-                except ValueError:
-                    # Handle case where all true values are the same class
-                    outer_auroc_scores.append(0.5)  # Random guess
-
-            # Average AUROC across cognitive variables
-            mean_outer_auroc = np.mean(outer_auroc_scores)
-            results['outer_scores'].append(mean_outer_auroc)
-
-        # Store the best components for this repetition
-        results['repetition_best_components'].append(rep_best_components)
-
-    # Find the most common number of components across all outer folds and repetitions
-    all_best_components = results['best_n_components']
-    from collections import Counter
-    component_counts = Counter(all_best_components)
-    final_best_n_comp = component_counts.most_common(1)[0][0]
-    results['final_best_n_components'] = final_best_n_comp
-
-    # Train a final model on the entire dataset using the most common number of components
-    final_model = PLSRegression(n_components=final_best_n_comp)
-    final_model.fit(X, Y)
-    results['final_model'] = final_model
-
-    # Add additional information to results
-    results['n_components_range'] = n_components_range
-    results['outer_folds'] = outer_folds
-    results['inner_folds'] = inner_folds
-    results['scale'] = scale
-    results['n_repetitions'] = n_repetitions
-
-    return results
+    Returns
+    -------
+    auroc: Union[float,
+                 dict[str,
+                      Union[PLSRegression,
+                            float]]]
+        Return the R2 score, and optionally the regression model.
+    """
+    pls = PLSRegression(
+        n_components=n_components, scale=True, max_iter=1000).fit(
+        X=x_train, y=y_train
+    )
+    score = pls.score(x_test, y_test)
+    if return_full:
+        r2_score = {"model": pls, "score": score}
+    else:
+        r2_score = score
+    return r2_score
 
 
 def run_snf(
