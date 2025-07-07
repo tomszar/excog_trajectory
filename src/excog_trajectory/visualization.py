@@ -31,7 +31,7 @@ def plot_distributions(
     vars : list of str
         List of variables to plot
     n_cols : int, default=3
-        Number of columns in the grid of plots
+        Number of cols in the grid of plots
     figsize : tuple of int, default=(15, 10)
         Figure size (width, height) in inches
     save_path : str, optional
@@ -72,7 +72,7 @@ def plot_exposure_outcome_relationships(
     exposure_vars : list of str
         List of exposure variables to plot against the outcome
     n_cols : int, default=3
-        Number of columns in the grid of plots
+        Number of cols in the grid of plots
     figsize : tuple of int, default=(15, 10)
         Figure size (width, height) in inches
     save_path : str, optional
@@ -188,7 +188,7 @@ def plot_exposure_correlation_matrix(
     matplotlib.figure.Figure
         The created figure object
     """
-    # Use all columns in data as exposure variables
+    # Use all cols in data as exposure variables
     exposure_vars = list(data.columns)
 
     if not exposure_vars:

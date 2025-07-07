@@ -15,6 +15,7 @@ import miceforest as mf
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
+from excog_trajectory import columns
 
 
 def load_nhanes_data(
@@ -62,7 +63,10 @@ def load_nhanes_data(
     return data_dict
 
 
-def remove_nan_from_columns(data: pd.DataFrame, columns: Union[str, List[str]] = 'CFDRIGHT') -> pd.DataFrame:
+def remove_nan_from_columns(
+        data: pd.DataFrame,
+        cols: Union[str, List[str]] = 'CFDRIGHT'
+) -> pd.DataFrame:
     """
     Remove rows with NaN values in the specified column(s).
 
@@ -70,7 +74,7 @@ def remove_nan_from_columns(data: pd.DataFrame, columns: Union[str, List[str]] =
     ----------
     data : pd.DataFrame
         DataFrame containing the columns to check for NaN values
-    columns : Union[str, List[str]], optional
+    cols : Union[str, List[str]], optional
         Column name(s) to check for NaN values, by default 'CFDRIGHT'
         Can be a single column name (string) or a list of column names
 
@@ -85,31 +89,31 @@ def remove_nan_from_columns(data: pd.DataFrame, columns: Union[str, List[str]] =
         If any of the specified columns are not present in the DataFrame
     """
     # Convert single column to list for consistent handling
-    if isinstance(columns, str):
-        columns = [columns]
+    if isinstance(cols, str):
+        cols = [cols]
 
-    # Check if all columns exist in the DataFrame
-    for column in columns:
+    # Check if all cols exist in the DataFrame
+    for column in cols:
         if column not in data.columns:
             raise KeyError(f"Column '{column}' not found in the DataFrame")
 
-    # Drop rows where any of the specified columns have NaN values
-    cleaned_data = data.dropna(subset=columns)
+    # Drop rows where any of the specified cols have NaN values
+    cleaned_data = data.dropna(subset=cols)
 
     # Print information about removed rows
     num_removed = len(data) - len(cleaned_data)
     if num_removed > 0:
-        if len(columns) == 1:
-            print(f"Removed {num_removed} rows with NaN values in {columns[0]}")
+        if len(cols) == 1:
+            print(f"Removed {num_removed} rows with NaN values in {cols[0]}")
         else:
-            print(f"Removed {num_removed} rows with NaN values in columns: {', '.join(columns)}")
+            print(f"Removed {num_removed} rows with NaN values in cols: {', '.join(cols)}")
 
     return cleaned_data
 
 
 def get_columns_with_nan(data: pd.DataFrame) -> Dict[str, int]:
     """
-    Get a dictionary of all columns in the DataFrame that contain at least one NaN value,
+    Get a dictionary of all cols in the DataFrame that contain at least one NaN value,
     along with the count of NaN values in each column.
 
     Parameters
@@ -137,7 +141,7 @@ def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
     ----------
     data : pd.DataFrame
         DataFrame to check for missing values. Should contain either a 'SDDSRVYR', 'Cycle' column,
-        or columns starting with 'Cycle_' (dummy variables for cycles).
+        or cols starting with 'Cycle_' (dummy variables for cycles).
         If none of these are present, will calculate overall missing percentages.
 
     Returns
@@ -150,7 +154,7 @@ def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
     # Initialize an empty list to store results
     results = []
 
-    # Check for columns that start with 'Cycle_' (dummy variables)
+    # Check for cols that start with 'Cycle_' (dummy variables)
     cycle_dummy_cols = [col for col in data.columns if col.startswith('Cycle_')]
 
     # Determine which column to use for grouping
@@ -165,7 +169,7 @@ def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
         group_col = 'cycle_dummy'
         group_name = 'cycle'
     else:
-        # If no grouping columns exist, calculate overall missing percentages
+        # If no grouping cols exist, calculate overall missing percentages
         total_rows = len(data)
         for col in data.columns:
             missing_percentage = (data[col].isna().sum() / total_rows) * 100
@@ -195,7 +199,7 @@ def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
             if total_rows > 0:  # Only proceed if there are rows in this group
                 # Calculate the percentage of missing values for each column
                 for col in data.columns:
-                    # Skip the cycle dummy columns in the calculation
+                    # Skip the cycle dummy cols in the calculation
                     if col not in cycle_dummy_cols:
                         missing_percentage = (group_data[col].isna().sum() / total_rows) * 100
 
@@ -234,7 +238,7 @@ def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
     # Pivot the DataFrame to get it in wide format
     wide_df = long_df.pivot(index='column_name', columns=group_name, values='percentage_missing')
 
-    # Rename the columns to make them more descriptive
+    # Rename the cols to make them more descriptive
     if group_col == 'SDDSRVYR':
         wide_df.columns = [f'year_{value}_missing_pct' for value in wide_df.columns]
     else:
@@ -297,7 +301,7 @@ def filter_exposure_variables(nhanes_data: Dict[str, pd.DataFrame],
     Filter variables from nhanes_data["main"] that belong to specific exposure categories.
 
     Uses the nhanes_data["description"] dataframe to retrieve the association between
-    a variable and its category (columns var and category respectively).
+    a variable and its category (cols var and category respectively).
 
     Parameters
     ----------
@@ -316,15 +320,15 @@ def filter_exposure_variables(nhanes_data: Dict[str, pd.DataFrame],
     ------
     KeyError
         If "main" or "description" keys are not present in nhanes_data
-        If "var" or "category" columns are not present in nhanes_data["description"]
+        If "var" or "category" cols are not present in nhanes_data["description"]
     """
     # Check if required keys are present in nhanes_data
     if "main" not in nhanes_data or "description" not in nhanes_data:
         raise KeyError("nhanes_data must contain 'main' and 'description' keys")
 
-    # Check if required columns are present in nhanes_data["description"]
+    # Check if required cols are present in nhanes_data["description"]
     if "var" not in nhanes_data["description"].columns or "category" not in nhanes_data["description"].columns:
-        raise KeyError("nhanes_data['description'] must contain 'var' and 'category' columns")
+        raise KeyError("nhanes_data['description'] must contain 'var' and 'category' cols")
 
     # List of exposure categories to retain
     exposure_categories = [  # "alcohol use",
@@ -482,7 +486,7 @@ def apply_qc_rules(
     4. Remove variables with 100% missing data in at least one survey year
 
     These rules are applied to all variables except cognitive and covariate variables.
-    The returned DataFrame will have sample, covariates, and cognitive_vars first in the order of columns.
+    The returned DataFrame will have sample, covariates, and cognitive_vars first in the order of cols.
 
     Parameters
     ----------
@@ -507,22 +511,21 @@ def apply_qc_rules(
     extended_covs = covariates.copy()
 
     # Transform categorical covariates into dummy variables
-    # The columns we need to transform are Cycle, RIAGENDR, and RIDRETH1
-    categorical_covariates = ["Cycle", "RIAGENDR", "RIDRETH1"]
-
     # Check which categorical covariates are present in the data
-    categorical_covariates_present = [col for col in categorical_covariates if col in data_qc.columns]
+    categorical_covariates = columns.validate_columns(
+        data_qc,
+        columns.CATEGORICAL_COVARIATES
+    )
 
-    if categorical_covariates_present:
-        print(f"Transforming categorical covariates into dummy variables: {categorical_covariates_present}")
-
+    if categorical_covariates:
+        print(f"Transforming categorical covariates into dummy variables: {categorical_covariates}")
         # Create dummy variables for each categorical covariate and add them to
         # the covariates list
         dummies = pd.get_dummies(data_qc,
-                                 prefix=categorical_covariates_present,
+                                 prefix=categorical_covariates,
                                  drop_first=False,
                                  dtype=int,
-                                 columns=categorical_covariates_present)
+                                 columns=categorical_covariates)
         new_vars = [col for col in dummies.columns.to_list() if col not in data_qc.columns.to_list()]
         extended_covs.extend(new_vars)
         data_qc = dummies
@@ -608,7 +611,7 @@ def apply_qc_rules(
             var_missing = missing_by_year[missing_by_year['column_name'] == var]
 
             # Check if any survey year has 100% missing data
-            # Get all columns except 'column_name' (these are the survey year columns)
+            # Get all cols except 'column_name' (these are the survey year cols)
             year_columns = [col for col in missing_by_year.columns if col != 'column_name']
 
             # Check if any survey year has 100% missing data
@@ -722,7 +725,7 @@ def identify_variable_types(data: pd.DataFrame) -> Dict[str, str]:
     var_types = {}
 
     for col in data.columns:
-        # Skip columns with all NaN values
+        # Skip cols with all NaN values
         if data[col].isna().all():
             continue
 
@@ -749,7 +752,6 @@ def impute_exposure_variables(
         output_path: Optional[str] = None,
         n_imputations: int = 5,
         random_state: int = 42,
-        n_random_vars: Optional[int] = None,
         n_iterations: int = 5,
         tune_parameters: bool = True,
         save_kernel: bool = False,
@@ -776,8 +778,6 @@ def impute_exposure_variables(
         Number of imputed datasets to generate, by default 5
     random_state : int, optional
         Random state for reproducibility, by default 42
-    n_random_vars : Optional[int], optional
-        Number of random variables to select for imputation. If None, all variables are used, by default None
     n_iterations : int, optional
         Number of iterations for the imputation procedure, by default 5
     tune_parameters : bool
@@ -794,7 +794,7 @@ def impute_exposure_variables(
     ImputationKernel
     """
     if output_path is None:
-        output_path = "data/processed/"
+        output_path = "data/processed/imputed/"
 
     if load_kernel:
         # Load the existing ImputationKernel object
@@ -818,23 +818,9 @@ def impute_exposure_variables(
             cycle_data = data['Cycle'].copy()
             print("Cycle column found and will be preserved but not used in imputation")
 
-        demographic_vars = ["RIDAGEYR", "RIAGENDR", "INDFMPIR",
-                            "DMDEDUC2", "RIDRETH1"]
-        # Exclude sample and Cycle from exposure variables
-        exposure_vars = [col for col in data.columns if col not in demographic_vars and col != 'sample' and col != 'Cycle']
-
-        print(f"Identified {len(exposure_vars)} exposure variables")
-
-        # Randomly select a subset of variables if n_random_vars is provided
-        if n_random_vars is not None and n_random_vars < len(exposure_vars):
-            # Set random seed for reproducibility
-            np.random.seed(random_state)
-            # Randomly select n_random_vars variables
-            exposure_vars = np.random.choice(exposure_vars, size=n_random_vars, replace=False).tolist()
-            print(f"Randomly selected {len(exposure_vars)} variables for imputation")
-
         # Create a copy of the data for imputation, excluding sample and Cycle
-        to_impute = data.loc[:, demographic_vars + exposure_vars].copy()
+        validated_ids = columns.validate_columns(data, columns.IDS, raise_error=False)
+        to_impute = data.drop(columns=validated_ids)
 
         # Create a dataset for miceforest
         print("Creating miceforest kernel...")
@@ -852,7 +838,7 @@ def impute_exposure_variables(
             optimal_parameters = kernel.tune_parameters(use_gbdt=True)
             print(f"Running imputation with {n_iterations} iterations...")
             kernel.mice(n_iterations, variable_parameters=optimal_parameters)
-        elif tune_parameters is False:
+        elif not tune_parameters:
             print(f"Running imputation with {n_iterations} iterations...")
             kernel.mice(n_iterations)
         else:
@@ -897,7 +883,7 @@ def impute_exposure_variables(
             imputed_dataset['Cycle'] = cycle_data.values
             cols.append('Cycle')
 
-        # Reorder columns to put sample and Cycle first
+        # Reorder cols to put sample and Cycle first
         if cols:
             remaining_cols = [col for col in imputed_dataset.columns if col not in cols]
             imputed_dataset = imputed_dataset[cols + remaining_cols]

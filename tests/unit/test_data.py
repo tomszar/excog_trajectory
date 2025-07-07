@@ -155,7 +155,7 @@ def test_remove_nan_from_cfdright():
     assert all(pd.notna(result["CFDRIGHT"]))
     assert list(result["CFDRIGHT"]) == [10, 30, 50]
 
-    # Check that other columns were preserved
+    # Check that other cols were preserved
     assert "OTHER_COL" in result.columns
     assert list(result["SEQN"]) == [1, 3, 5]
 
@@ -214,7 +214,7 @@ def test_remove_nan_from_columns_single():
     assert all(pd.notna(result["TEST_COL"]))
     assert list(result["TEST_COL"]) == [10, 30, 50]
 
-    # Check that other columns were preserved
+    # Check that other cols were preserved
     assert "OTHER_COL" in result.columns
     assert list(result["SEQN"]) == [1, 3, 5]
 
@@ -224,8 +224,8 @@ def test_remove_nan_from_columns_single():
 
 
 def test_remove_nan_from_columns_multiple():
-    """Test that remove_nan_from_columns correctly removes rows with NaN values in multiple columns."""
-    # Create a DataFrame with some NaN values in multiple columns
+    """Test that remove_nan_from_columns correctly removes rows with NaN values in multiple cols."""
+    # Create a DataFrame with some NaN values in multiple cols
     test_data = pd.DataFrame({
         "SEQN": [1, 2, 3, 4, 5, 6],
         "COL1": [10, None, 30, 40, 50, 60],
@@ -233,19 +233,19 @@ def test_remove_nan_from_columns_multiple():
         "OTHER_COL": [1, 2, 3, 4, 5, 6]
     })
 
-    # Call the function with multiple columns
+    # Call the function with multiple cols
     result = data.remove_nan_from_columns(test_data, ["COL1", "COL2"])
 
     # Check that the result is a DataFrame
     assert isinstance(result, pd.DataFrame)
 
-    # Check that rows with NaN in any of the specified columns were removed
+    # Check that rows with NaN in any of the specified cols were removed
     assert len(result) == 3
     assert all(pd.notna(result["COL1"]))
     assert all(pd.notna(result["COL2"]))
     assert list(result["SEQN"]) == [1, 4, 6]
 
-    # Check that other columns were preserved
+    # Check that other cols were preserved
     assert "OTHER_COL" in result.columns
 
     # Check that the original DataFrame was not modified
@@ -263,7 +263,7 @@ def test_remove_nan_from_columns_default():
         "OTHER_COL": [1, 2, 3, 4, 5]
     })
 
-    # Call the function without specifying columns (should use CFDRIGHT by default)
+    # Call the function without specifying cols (should use CFDRIGHT by default)
     result = data.remove_nan_from_columns(test_data)
 
     # Check that rows with NaN in CFDRIGHT were removed
@@ -288,14 +288,14 @@ def test_remove_nan_from_columns_missing_column():
     with pytest.raises(KeyError):
         data.remove_nan_from_columns(test_data, "MISSING_COL")
 
-    # Check that the function raises a KeyError for multiple columns where one is missing
+    # Check that the function raises a KeyError for multiple cols where one is missing
     with pytest.raises(KeyError):
         data.remove_nan_from_columns(test_data, ["OTHER_COL", "MISSING_COL"])
 
 
 def test_get_columns_with_nan():
-    """Test that get_columns_with_nan correctly identifies columns with NaN values and their counts."""
-    # Create a DataFrame with NaN values in specific columns
+    """Test that get_columns_with_nan correctly identifies cols with NaN values and their counts."""
+    # Create a DataFrame with NaN values in specific cols
     test_data = pd.DataFrame({
         "SEQN": [1, 2, 3, 4, 5],
         "COL_WITH_NAN_1": [10, None, 30, 40, 50],
@@ -309,7 +309,7 @@ def test_get_columns_with_nan():
     # Check that the result is a dictionary
     assert isinstance(result, dict)
 
-    # Check that the result contains exactly the columns with NaN values
+    # Check that the result contains exactly the cols with NaN values
     assert len(result) == 2
     assert "COL_WITH_NAN_1" in result
     assert "COL_WITH_NAN_2" in result
@@ -465,7 +465,7 @@ def test_filter_exposure_variables():
 
 def test_get_percentage_missing():
     """Test that get_percentage_missing correctly calculates the percentage of missing data for each column by survey year in wide format."""
-    # Create a DataFrame with NaN values in specific columns and survey years
+    # Create a DataFrame with NaN values in specific cols and survey years
     test_data = pd.DataFrame({
         "SDDSRVYR": [1, 1, 2, 2, 2],  # Two survey years: 1 and 2
         "SEQN": [1, 2, 3, 4, 5],
@@ -480,13 +480,13 @@ def test_get_percentage_missing():
     # Check that the result is a DataFrame
     assert isinstance(result, pd.DataFrame)
 
-    # Check that the result has the expected columns
+    # Check that the result has the expected cols
     assert "column_name" in result.columns
     assert "year_1_missing_pct" in result.columns
     assert "year_2_missing_pct" in result.columns
 
     # Check that the result contains one row for each column in the original data
-    assert len(result) == 5  # 5 columns in the original data
+    assert len(result) == 5  # 5 cols in the original data
 
     # Check percentages for each column and year
     seqn_row = result[result["column_name"] == "SEQN"]
@@ -513,7 +513,7 @@ def test_get_percentage_missing():
     })
     result_no_nan = data.get_percentage_missing(test_data_no_nan)
     assert isinstance(result_no_nan, pd.DataFrame)
-    assert len(result_no_nan) == 3  # 3 columns in the original data
+    assert len(result_no_nan) == 3  # 3 cols in the original data
 
     # Check that all percentages are 0.0
     for col in result_no_nan.columns:
@@ -527,7 +527,7 @@ def test_get_percentage_missing():
     })
     result_multiple_nan = data.get_percentage_missing(test_data_multiple_nan)
     assert isinstance(result_multiple_nan, pd.DataFrame)
-    assert len(result_multiple_nan) == 2  # 2 columns in the original data
+    assert len(result_multiple_nan) == 2  # 2 cols in the original data
 
     # Check percentages for each column and year
     col_row = result_multiple_nan[result_multiple_nan["column_name"] == "COL_WITH_MULTIPLE_NAN"]
@@ -643,7 +643,7 @@ def test_apply_qc_rules():
     assert "mostly_zeros" in test_data.columns
     assert "missing_in_year" in test_data.columns
 
-    # Check that SEQN, covariates, and cognitive_vars are first in the order of columns
+    # Check that SEQN, covariates, and cognitive_vars are first in the order of cols
     # Note: The order might be different now due to the added dummy variables
     first_columns = list(result.columns)[:6]
     assert "SEQN" in first_columns

@@ -29,7 +29,7 @@ def test_load_nhanes_data_real_file():
     assert len(nhanes_data['data_1']) > 0
     assert len(nhanes_data['data_2']) > 0
 
-    # Check that the data has expected columns
+    # Check that the data has expected cols
     data_1 = nhanes_data['data_1']
     data_2 = nhanes_data['data_2']
     assert 'SEQN' in data_1.index.name  # Subject ID should be the index
@@ -39,8 +39,8 @@ def test_load_nhanes_data_real_file():
     print(f"Data keys: {list(nhanes_data.keys())}")
     print(f"Data 1 shape: {nhanes_data['data_1'].shape}")
     print(f"Data 2 shape: {nhanes_data['data_2'].shape}")
-    print(f"Data 1 columns: {nhanes_data['data_1'].columns.tolist()[:5]}...")  # Show first 5 columns
-    print(f"Data 2 columns: {nhanes_data['data_2'].columns.tolist()[:5]}...")  # Show first 5 columns
+    print(f"Data 1 columns: {nhanes_data['data_1'].columns.tolist()[:5]}...")  # Show first 5 cols
+    print(f"Data 2 columns: {nhanes_data['data_2'].columns.tolist()[:5]}...")  # Show first 5 cols
 
 
 @pytest.mark.integration

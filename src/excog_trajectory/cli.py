@@ -11,7 +11,7 @@ import os
 
 import pandas as pd
 
-from excog_trajectory import analysis, data, visualization
+from excog_trajectory import analysis, data, visualization, columns
 
 
 def parse_args():
@@ -35,7 +35,7 @@ def parse_args():
     plsr_parser.add_argument(
         "--data-path",
         type=str,
-        default="data/processed/combined/imputed_nhanes_dat1.csv",
+        default="data/processed/imputed/imputed_nhanes_dat1.csv",
         help="Path to the imputed NHANES dataset",
     )
     plsr_parser.add_argument(
@@ -187,12 +187,6 @@ def parse_args():
         help="Number of iterations for the imputation procedure",
     )
     impute_parser.add_argument(
-        "--n-random-vars",
-        type=int,
-        default=None,
-        help="Number of random variables to select for imputation. If not provided, all variables are used.",
-    )
-    impute_parser.add_argument(
         "--save-kernel",
         type=bool,
         default=False,
@@ -230,14 +224,13 @@ def clean_data(args):
     print(f"Loading NHANES data...")
     nhanes_data = data.load_nhanes_data()
 
-    # Define variables for analysis
-    cognitive_vars = ["CFDRIGHT", "CFDDS"]  # Cognitive function right responses
-    covariates = ["Cycle", "RIDAGEYR", "RIAGENDR", "INDFMPIR",
-                  "DMDEDUC2", "RIDRETH1"]  # Demographics and survey cycle
+    # Define variables for analysis using the cols module
+    cognitive_vars = columns.COGNITIVE_VARS  # Cognitive function right responses
+    covariates = columns.COVARIATES  # Demographics and survey cycle
     cols_to_drop_na = cognitive_vars + covariates
-    cols_to_drop = ["SDDSRVYR", "INDHHINC", "INDHHIN2"]  # Columns to drop
+    cols_to_drop = columns.COLS_TO_DROP  # Columns to drop
 
-    print("Removing NaN values and unnecessary columns...")
+    print("Removing NaN values and unnecessary cols...")
     for dat in nhanes_data:
         for col in cols_to_drop_na:
             if col in nhanes_data[dat].columns:
@@ -272,14 +265,12 @@ def clean_data(args):
 
         # Create correlation matrix of exposure variables for each individual dataset
         print(f"Creating correlation matrix of exposure variables for {dat}...")
-        # Exclude original covariates and dummy variables created from categorical covariates
-        categorical_covariates = ["Cycle", "RIAGENDR", "RIDRETH1"]
-        dummy_prefixes = [f"{cov}_" for cov in categorical_covariates]
-
-        # Filter out covariates and any column that starts with dummy variable prefixes
-        exposure_vars = [col for col in nhanes_data[dat].columns 
-                        if col not in cognitive_vars + covariates and 
-                        not any(col.startswith(prefix) for prefix in dummy_prefixes)]
+        # Get exposure variables using the cols module
+        exposure_vars = columns.get_exposure_vars(
+            data=nhanes_data[dat],
+            cognitive_vars=cognitive_vars,
+            covariates=covariates
+        )
 
         visualization.plot_exposure_correlation_matrix(
             data=nhanes_data[dat][exposure_vars],
@@ -304,15 +295,19 @@ def clean_data(args):
         if "CFDDS" in cognitive_vars:
             cognitive_vars = ["CFDRIGHT" if var == "CFDDS" else var for var in cognitive_vars]
 
-    # First, perform an outer merge to get all columns from both dataframes
-    combined_data = pd.merge(nhanes_data["data_1"], nhanes_data["data_2"],
-                             left_index=True, right_index=True, how="outer", suffixes=('_1', '_2'))
+    # First, perform an outer merge to get all cols from both dataframes
+    combined_data = pd.merge(nhanes_data["data_1"],
+                             nhanes_data["data_2"],
+                             left_index=True,
+                             right_index=True,
+                             how="outer",
+                             suffixes=('_1', '_2'))
 
-    # Identify columns that have suffixes (indicating they were in both dataframes)
+    # Identify cols that have suffixes (indicating they were in both dataframes)
     suffix_1_cols = [col for col in combined_data.columns if col.endswith('_1')]
     base_cols = [col[:-2] for col in suffix_1_cols]  # Remove the suffix to get the base column name
 
-    # For each pair of suffixed columns, combine them into a single column
+    # For each pair of suffixed cols, combine them into a single column
     for base_col in base_cols:
         col_1 = f"{base_col}_1"
         col_2 = f"{base_col}_2"
@@ -320,13 +315,13 @@ def clean_data(args):
         # Create a new column that takes values from col_1, but uses col_2 where col_1 is NaN
         combined_data[base_col] = combined_data[col_1].combine_first(combined_data[col_2])
 
-        # Drop the original suffixed columns
+        # Drop the original suffixed cols
         combined_data = combined_data.drop([col_1, col_2], axis=1)
 
     print(f"Combined data shape: {combined_data.shape}")
 
-    # Filter columns in the combined dataset to keep only those with at least one observation in each Cycle
-    print("Filtering columns to keep those with at least one observation in each Cycle...")
+    # Filter cols in the combined dataset to keep only those with at least one observation in each Cycle
+    print("Filtering cols to keep those with at least one observation in each Cycle...")
 
     # Check if we have the original 'Cycle' column or dummy variables
     cycle_dummy_cols = [col for col in combined_data.columns if col.startswith('Cycle_')]
@@ -350,6 +345,8 @@ def clean_data(args):
     elif cycle_dummy_cols:
         # Cycle has been converted to dummy variables, use them for grouping
         print(f"Using Cycle dummy variables for filtering: {cycle_dummy_cols}")
+        # Add zeros to dummy cols instead of NaNs
+        combined_data[cycle_dummy_cols] = combined_data[cycle_dummy_cols].fillna(0)
         columns_to_keep = []
 
         for column in combined_data.columns:
@@ -364,11 +361,11 @@ def clean_data(args):
             if has_observation_in_all_cycles:
                 columns_to_keep.append(column)
     else:
-        # No Cycle information available, keep all columns
-        print("Warning: No Cycle column or dummy variables found. Keeping all columns.")
+        # No Cycle information available, keep all cols
+        print("Warning: No Cycle column or dummy variables found. Keeping all cols.")
         columns_to_keep = combined_data.columns.tolist()
 
-    # Keep only columns with at least one observation in each Cycle
+    # Keep only cols with at least one observation in each Cycle
     combined_data = combined_data[columns_to_keep]
     print(f"Combined data shape after filtering: {combined_data.shape}")
 
@@ -395,15 +392,12 @@ def clean_data(args):
 
     # Create correlation matrix of exposure variables for the combined dataset
     print("Creating correlation matrix of exposure variables for combined dataset...")
-    # Since we don't have description data, we'll use all columns except cognitive and covariates
-    # Exclude original covariates and dummy variables created from categorical covariates
-    categorical_covariates = ["Cycle", "RIAGENDR", "RIDRETH1"]
-    dummy_prefixes = [f"{cov}_" for cov in categorical_covariates]
-
-    # Filter out covariates and any column that starts with dummy variable prefixes
-    exposure_vars = [col for col in combined_data.columns 
-                    if col not in cognitive_vars + covariates and 
-                    not any(col.startswith(prefix) for prefix in dummy_prefixes)]
+    # Get exposure variables using the cols module
+    exposure_vars = columns.get_exposure_vars(
+        data=combined_data,
+        cognitive_vars=cognitive_vars,
+        covariates=covariates
+    )
     visualization.plot_exposure_correlation_matrix(
         data=combined_data[exposure_vars],
         fname=os.path.join(args.output_dir, "exposure_correlation_matrix.png"),
@@ -439,26 +433,22 @@ def run_imputation(args):
     """Run the imputation procedure."""
 
     print(f"Running imputation procedure...")
+    output_path = args.output_path
+    if output_path is None:
+        output_path = "data/processed/imputed/"
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     # Call the impute_exposure_variables function
     kernel = data.impute_exposure_variables(
         data_path=args.data_path,
-        output_path=args.output_path,
+        output_path=output_path,
         n_imputations=args.n_imputations,
         random_state=args.random_state,
-        n_random_vars=args.n_random_vars,
         n_iterations=args.n_iterations,
         save_kernel=args.save_kernel,
         load_kernel=args.load_kernel,
         diagnostic_plots=args.diagnostic_plots,
     )
-
-    # Set default output path if none is provided
-    output_path = args.output_path
-    if output_path is None:
-        output_path = "data/processed/"
-
-    # Note: We no longer have description data available
 
     # Create output directory for correlation matrices if it doesn't exist
     correlation_output_dir = "results/correlation_matrices"
@@ -475,11 +465,12 @@ def run_imputation(args):
 
         # Load the imputed dataset
         imputed_data = pd.read_csv(filepath)
+        exposure_vars = columns.get_exposure_vars(imputed_data)
 
         # Create correlation matrix
         print(f"Creating correlation matrix for dataset {dataset_num}...")
         visualization.plot_exposure_correlation_matrix(
-            data=imputed_data.drop(columns=["sample", "Cycle"]),
+            data=imputed_data[exposure_vars],
             fname=os.path.join(correlation_output_dir, f"exposure_correlation_matrix_dataset{dataset_num}.png"),
             dpi=300,
         )
@@ -493,18 +484,31 @@ def run_plsr_analysis(args):
     print(f"Loading imputed NHANES data from {args.data_path}...")
     data_df = pd.read_csv(args.data_path)
 
-    # Define variables for analysis
-    cognitive_vars = ["CFDDS"]  # Cognitive function right responses
-    covariates = ["Cycle", "RIDAGEYR", "RIAGENDR", "INDFMPIR",
-                  "DMDEDUC2", "RIDRETH1"]  # Demographics and survey cycle
-    # Identify exposure variables (all variables that are not cognitive or covariates)
-    all_vars = set(data_df.columns)
-    non_exposure_vars = set(cognitive_vars + covariates)
-    exposure_vars = list(all_vars - non_exposure_vars)
-    x = data_df[exposure_vars + covariates].drop(columns=["Cycle"])
-    y = data_df[cognitive_vars]
+    # Define variables for analysis using the cols module
+    cognitive_vars = columns.COGNITIVE_VARS  # Using a specific cognitive variable for PLSR
+    covariates = columns.COVARIATES  # Demographics and survey cycle
 
-    print(f"Running PLSR with {len(exposure_vars)} exposure variables, {len(cognitive_vars)} cognitive variables, and {len(covariates)} covariates...")
+    # Validate cols exist in the dataset
+    valid_cognitive_vars = columns.validate_columns(data_df,
+                                                    cognitive_vars,
+                                                    raise_error=False)
+    valid_covariates = columns.validate_columns(data_df,
+                                                covariates,
+                                                raise_error=False)
+    dummy_vars = columns.get_dummy_vars(data_df)
+
+    # Get exposure variables using the cols module
+    exposure_vars = columns.get_exposure_vars(
+        data=data_df,
+        cognitive_vars=valid_cognitive_vars,
+        covariates=valid_covariates
+    )
+    x = data_df[exposure_vars + valid_covariates + dummy_vars]
+    y = data_df[valid_cognitive_vars]
+
+    print(f"Running PLSR with {len(exposure_vars)} exposure variables, "
+          f"{len(valid_cognitive_vars)} cognitive variables, "
+          f"and {len(valid_covariates) + len(dummy_vars)} covariates...")
 
     if args.n_repetitions > 1:
         print(
@@ -549,45 +553,17 @@ def run_snf_analysis(args):
 
     # Define variables for analysis
     cognitive_vars = ["CFDRIGHT"]  # Cognitive function right responses
+    # Note: SNF uses a different set of covariates than other functions
     covariates = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic", "other_eth", "SES_LEVEL",
                   "education", "SDDSRVYR"]  # Demographics and survey cycle
 
-    # Since we no longer have description data, we'll create exposure categories based on column name patterns
+    # Validate cols exist in the dataset
+    valid_cognitive_vars = columns.validate_columns(data_df, cognitive_vars, raise_error=False)
+    valid_covariates = columns.validate_columns(data_df, covariates, raise_error=False)
+
+    # Create exposure categories based on column name patterns using the cols module
     print("Creating exposure categories based on column name patterns...")
-
-    # Define patterns for different exposure categories
-    exposure_patterns = {
-        "heavy metals": ["LBX", "PB", "CD", "HG", "SE", "MN"],
-        "pesticides": ["LBX", "DDE", "DDT", "HCH", "NAL", "PAR", "CYF", "DME"],
-        "phenols": ["LBX", "BP", "PH", "TR", "BP3", "BPA"],
-        "phthalates": ["LBX", "PHT", "MHP", "MBP", "MZP", "MOP", "MCH", "MOH"],
-        "nutrients": ["LBX", "FOL", "B12", "VIC", "VID", "VIA", "VIE"],
-        "cotinine": ["LBX", "COT"],
-        "pcbs": ["LBX", "PCB"],
-        "dioxins": ["LBX", "DIO", "PCD", "HXC"],
-        "furans": ["LBX", "FUR", "PCP", "HXC"],
-        "hydrocarbons": ["LBX", "PAH", "FLU", "PHE", "PYR"],
-        "perchlorate": ["LBX", "PER", "SCN", "NIT"],
-        "phytoestrogens": ["LBX", "EQU", "DAI", "GEN"],
-        "polybrominated ethers": ["LBX", "PBD", "BDE"],
-        "polyflourochemicals": ["LBX", "PFO", "PFH", "PFN", "PFD"],
-        "volatile compounds": ["LBX", "VOC", "BEN", "TOL", "XYL"]
-    }
-
-    # Create a dictionary mapping exposure categories to variable names
-    exposure_categories = {}
-
-    # Assign variables to categories based on patterns
-    for category, patterns in exposure_patterns.items():
-        category_vars = []
-        for col in data_df.columns:
-            # Check if any pattern matches the column name
-            if any(pattern in col for pattern in patterns):
-                category_vars.append(col)
-
-        # Only add the category if it has variables
-        if category_vars:
-            exposure_categories[category] = category_vars
+    exposure_categories = columns.categorize_exposure_vars(data_df)
 
     print(f"Identified {len(exposure_categories)} exposure categories")
     for category, vars_list in exposure_categories.items():
@@ -600,8 +576,8 @@ def run_snf_analysis(args):
     snf_results = analysis.run_snf(
         data=data_df,
         exposure_categories=exposure_categories,
-        cognitive_vars=cognitive_vars,
-        covariates=covariates,
+        cognitive_vars=valid_cognitive_vars,
+        covariates=valid_covariates,
         k=args.k,
         t=args.t,
         alpha=args.alpha,
