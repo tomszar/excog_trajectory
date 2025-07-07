@@ -7,6 +7,7 @@ exposure-outcome relationships, and analysis results.
 
 from typing import Dict, List, Optional, Tuple
 
+import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -238,3 +239,100 @@ def plot_exposure_correlation_matrix(
         return None
 
     return fig
+
+
+def plot_plsr_scores(
+        best_model,
+        data_df: pd.DataFrame,
+        cognitive_vars: List[str],
+        output_dir: str,
+        figsize: Tuple[int, int] = (10, 8),
+        cmap: str = 'viridis',
+        alpha: float = 0.5,
+        dpi: int = 300,
+) -> Dict[str, List[str]]:
+    """
+    Create scatter plots of the first two columns of x_scores from a PLSR model.
+
+    Parameters
+    ----------
+    best_model : PLSRegression
+        The fitted PLSR model containing x_scores_
+    data_df : pd.DataFrame
+        DataFrame containing the cognitive variables for coloring the points
+    cognitive_vars : List[str]
+        List of cognitive variables to use for coloring the scatter plots
+    output_dir : str
+        Directory to save the plots
+    figsize : tuple of int, default=(10, 8)
+        Figure size (width, height) in inches
+    cmap : str, default='viridis'
+        Colormap to use for the scatter plots
+    alpha : float, default=0.7
+        Alpha value for the scatter points
+    dpi : int, default=300
+        Resolution of the figure in dots per inch
+
+    Returns
+    -------
+    Dict[str, List[str]]
+        Dictionary containing the paths of the saved plots
+    """
+    # Get the x_scores from the best_model
+    x_scores = best_model.x_scores_
+
+    # Dictionary to store the paths of saved plots
+    saved_plots = {"plots": []}
+
+    # Create a scatter plot for each cognitive variable
+    for i, cog_var in enumerate(cognitive_vars):
+        # Create a figure
+        plt.figure(figsize=figsize)
+
+        # Create a scatter plot with points colored by the cognitive variable
+        scatter = plt.scatter(
+            x_scores[:, 0],
+            x_scores[:, 1],
+            c=data_df[cog_var],
+            cmap=cmap,
+            alpha=alpha
+        )
+
+        # Add a colorbar
+        cbar = plt.colorbar(scatter)
+        cbar.set_label(cog_var)
+
+        # Add labels and title
+        plt.xlabel('Component 1')
+        plt.ylabel('Component 2')
+        plt.title(f'PLSR Scores - First Two Components (Coded by {cog_var})')
+
+        # Add a grid
+        plt.grid(True, linestyle='--', alpha=alpha)
+
+        # Save the plot
+        plt.tight_layout()
+        plot_path = os.path.join(output_dir, f"plsr_scores_scatter_{cog_var}.png")
+        plt.savefig(plot_path, dpi=dpi)
+        plt.close()
+
+        # Add the path to the saved plots
+        saved_plots["plots"].append(plot_path)
+
+    # If no cognitive variables are available, create a simple scatter plot
+    if not cognitive_vars:
+        plt.figure(figsize=figsize)
+        plt.scatter(x_scores[:, 0], x_scores[:, 1], alpha=alpha)
+        plt.xlabel('Component 1')
+        plt.ylabel('Component 2')
+        plt.title('PLSR Scores - First Two Components')
+        plt.grid(True, linestyle='--', alpha=alpha)
+        plt.tight_layout()
+        plot_path = os.path.join(output_dir, "plsr_scores_scatter.png")
+        plt.savefig(plot_path, dpi=dpi)
+        plt.close()
+
+        # Add the path to the saved plots
+        saved_plots["plots"].append(plot_path)
+
+    return saved_plots

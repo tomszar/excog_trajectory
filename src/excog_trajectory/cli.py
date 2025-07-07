@@ -513,25 +513,36 @@ def run_plsr_analysis(args):
 
     if args.n_repetitions > 1:
         print(
-            f"Running PLSR with double cross-validation ({args.outer_folds} outer folds, {args.inner_folds} inner folds) repeated {args.n_repetitions} times...")
+            f"Running PLSR with double cross-validation ({args.outer_folds} outer folds, "
+            f"{args.inner_folds} inner folds) repeated {args.n_repetitions} times...")
     else:
         print(
-            f"Running PLSR with double cross-validation ({args.outer_folds} outer folds, {args.inner_folds} inner folds)...")
+            f"Running PLSR with double cross-validation ({args.outer_folds} outer folds, "
+            f"{args.inner_folds} inner folds)...")
 
     plsr_results = analysis.pls_double_cv(
         x=x,
         y=y,
         n_repeats=args.n_repetitions,
         max_components=args.max_components,
+        cv2_splits=args.outer_folds,
+        cv1_splits=args.inner_folds
     )
+    # Save table
+    plsr_results['table'].to_csv(
+        os.path.join(args.output_dir, "plsr_results_table.csv"),
+        index=False)
 
     # Print information about the final model
     mode = int(plsr_results['table']['LV'].mode()[0])
     print(f"\nThe most repeated number of LV: {str(mode)}")
     from sklearn.cross_decomposition import PLSRegression
     best_model = PLSRegression(
-        n_components=mode, scale=True, max_iter=1000).fit(
-        X=x, y=y
+        n_components=mode,
+        scale=True,
+        max_iter=1000).fit(
+        X=x,
+        y=y
     )
     print(f"A final model has been trained on the entire dataset using {str(mode)} components.")
 
@@ -540,7 +551,24 @@ def run_plsr_analysis(args):
     with open(os.path.join(args.output_dir, "best_model.pkl"), "wb") as f:
         pickle.dump(best_model, f)
 
+    # Create scatter plots of the first two columns of x_scores
+    plsr_plots = visualization.plot_plsr_scores(
+        best_model=best_model,
+        data_df=data_df,
+        cognitive_vars=valid_cognitive_vars,
+        output_dir=args.output_dir
+    )
+
     print(f"PLSR results saved to {os.path.join(args.output_dir, 'best_model.pkl')}")
+
+    # Print information about the saved plots
+    if plsr_plots["plots"]:
+        print("PLSR scores scatter plots saved to:")
+        for plot_path in plsr_plots["plots"]:
+            print(f"  - {plot_path}")
+    else:
+        print("No PLSR scores scatter plots were created.")
+
     print("PLSR analysis complete!")
 
 
