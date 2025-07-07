@@ -5,10 +5,9 @@ This module provides constants and utilities for handling column names,
 validating their existence in datasets, and managing dummy variables.
 """
 
-from typing import Dict, List, Optional, Set, Union
+from typing import List, Optional
 
 import pandas as pd
-
 
 # Define constants for column categories
 IDS = ["SEQN", "sample"]
@@ -62,7 +61,7 @@ def get_dummy_prefixes(categorical_columns: Optional[List[str]] = None) -> List[
 
 
 def get_dummy_vars(data: pd.DataFrame,
-                  categorical_covariates: Optional[List[str]] = None) -> List[str]:
+                   categorical_covariates: Optional[List[str]] = None) -> List[str]:
     """
     Get the names of all dummy variables in the DataFrame.
 
@@ -80,8 +79,8 @@ def get_dummy_vars(data: pd.DataFrame,
     dummy_prefixes = get_dummy_prefixes(categorical_covariates)
 
     # Find all columns that start with any of the dummy prefixes
-    dummy_vars = [col for col in data.columns 
-                 if any(col.startswith(prefix) for prefix in dummy_prefixes)]
+    dummy_vars = [col for col in data.columns
+                  if any(col.startswith(prefix) for prefix in dummy_prefixes)]
 
     return dummy_vars
 
@@ -124,8 +123,8 @@ def get_exposure_vars(data: pd.DataFrame,
     dummy_prefixes = get_dummy_prefixes(categorical_covariates)
 
     # Filter out covariates and any column that starts with dummy variable prefixes
-    exposure_vars = [col for col in data.columns 
-                    if col not in valid_cognitive_vars + valid_covariates + valid_id_vars and
-                    not any(col.startswith(prefix) for prefix in dummy_prefixes)]
+    exposure_vars = [col for col in data.columns
+                     if col not in valid_cognitive_vars + valid_covariates + valid_id_vars and
+                     not any(col.startswith(prefix) for prefix in dummy_prefixes)]
 
     return exposure_vars

@@ -15,6 +15,7 @@ import miceforest as mf
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
+
 from excog_trajectory import columns
 
 
@@ -54,7 +55,7 @@ def load_nhanes_data(
     data_dict = {}
 
     for i, file in enumerate(file_names):
-        data_key = f"data_{i+1}"
+        data_key = f"data_{i + 1}"
         data_dict[data_key] = pd.read_csv(os.path.join(data_path, file),
                                           index_col="sample",
                                           na_values=["nan"]).drop("sequence", axis=1)
@@ -174,7 +175,7 @@ def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
         for col in data.columns:
             missing_percentage = (data[col].isna().sum() / total_rows) * 100
             results.append({
-                'column_name': col,
+                'column_name'       : col,
                 'percentage_missing': missing_percentage
             })
 
@@ -205,8 +206,8 @@ def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
 
                         # Add the result to our list
                         results.append({
-                            group_name: cycle_category,
-                            'column_name': col,
+                            group_name          : cycle_category,
+                            'column_name'       : col,
                             'percentage_missing': missing_percentage
                         })
     else:
@@ -227,8 +228,8 @@ def get_percentage_missing(data: pd.DataFrame) -> pd.DataFrame:
 
                 # Add the result to our list
                 results.append({
-                    group_name: value,
-                    'column_name': col,
+                    group_name          : value,
+                    'column_name'       : col,
                     'percentage_missing': missing_percentage
                 })
 
@@ -420,14 +421,14 @@ def download_nhanes_data(
             if len(direct_url) > 1:
                 # If there are multiple URLs, append an index to the filename
                 base_name, ext = os.path.splitext(filename)
-                current_filename = f"{base_name}_{i+1}{ext}"
+                current_filename = f"{base_name}_{i + 1}{ext}"
             else:
                 current_filename = filename
 
             # Full path for the output file
             output_path = os.path.join(output_dir, current_filename)
 
-            print(f"Downloading NHANES data from direct URL ({i+1}/{len(direct_url)}): {url}...")
+            print(f"Downloading NHANES data from direct URL ({i + 1}/{len(direct_url)}): {url}...")
 
             # Download the file
             try:

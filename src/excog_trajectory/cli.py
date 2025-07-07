@@ -11,7 +11,7 @@ import os
 
 import pandas as pd
 
-from excog_trajectory import analysis, data, visualization, columns
+from excog_trajectory import analysis, columns, data, visualization
 
 
 def parse_args():
@@ -276,7 +276,8 @@ def clean_data(args):
             data=nhanes_data[dat][exposure_vars],
             fname=os.path.join(args.output_dir, f"exposure_correlation_matrix_{dat}.png"),
         )
-        print(f"Exposure correlation matrix for {dat} saved to {os.path.join(args.output_dir, f'exposure_correlation_matrix_{dat}.png')}")
+        print(
+            f"Exposure correlation matrix for {dat} saved to {os.path.join(args.output_dir, f'exposure_correlation_matrix_{dat}.png')}")
 
     # Combine data from both files after applying QC rules
     print("Combining data from multiple files...")
@@ -569,7 +570,8 @@ def run_snf_analysis(args):
     for category, vars_list in exposure_categories.items():
         print(f"  {category}: {len(vars_list)} variables")
 
-    print(f"Running SNF with {len(exposure_categories)} exposure categories, {len(cognitive_vars)} cognitive variables, and {len(covariates)} covariates...")
+    print(
+        f"Running SNF with {len(exposure_categories)} exposure categories, {len(cognitive_vars)} cognitive variables, and {len(covariates)} covariates...")
 
     # Run SNF
     from excog_trajectory import analysis

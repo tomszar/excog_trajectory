@@ -240,7 +240,7 @@ def run_snf(
 
         # Convert distances to similarities using a Gaussian kernel
         sigma = np.mean(dist_matrix)
-        sim_matrix = np.exp(-dist_matrix**2 / (2 * sigma**2))
+        sim_matrix = np.exp(-dist_matrix ** 2 / (2 * sigma ** 2))
 
         # Set diagonal to 0 (as required by SNF)
         np.fill_diagonal(sim_matrix, 0)
@@ -254,7 +254,7 @@ def run_snf(
         nn_matrix = np.zeros((n, n))
         for i in range(n):
             # Get indices of k largest values (excluding diagonal)
-            idx = np.argsort(sim_matrix[i, :])[-k-1:-1]
+            idx = np.argsort(sim_matrix[i, :])[-k - 1:-1]
             nn_matrix[i, idx] = sim_matrix[i, idx]
         return nn_matrix
 
@@ -287,7 +287,7 @@ def run_snf(
 
     for name, matrix in similarity_matrices.items():
         # Find k nearest neighbors
-        k_nearest = find_k_nearest_neighbors(matrix, min(k, matrix.shape[0]-1))
+        k_nearest = find_k_nearest_neighbors(matrix, min(k, matrix.shape[0] - 1))
         # Normalize the matrices
         normalized_matrices[name] = normalize_matrix(k_nearest)
         k_nearest_matrices[name] = k_nearest
@@ -312,16 +312,16 @@ def run_snf(
 
     # Create a dictionary to store the results
     results = {
-        "fused_matrix": fused_matrix,
+        "fused_matrix"       : fused_matrix,
         "similarity_matrices": similarity_matrices,
         "normalized_matrices": normalized_matrices,
-        "k_nearest_matrices": k_nearest_matrices,
+        "k_nearest_matrices" : k_nearest_matrices,
         "exposure_categories": exposure_categories,
-        "cognitive_vars": cognitive_vars,
-        "covariates": covariates,
-        "parameters": {
-            "k": k,
-            "t": t,
+        "cognitive_vars"     : cognitive_vars,
+        "covariates"         : covariates,
+        "parameters"         : {
+            "k"    : k,
+            "t"    : t,
             "alpha": alpha,
             "scale": scale,
         },
