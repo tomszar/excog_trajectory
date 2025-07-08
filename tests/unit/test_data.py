@@ -535,6 +535,122 @@ def test_get_percentage_missing():
     assert col_row["year_2_missing_pct"].values[0] == 100.0  # 2 out of 2 values are NaN
 
 
+def test_categorize_dsst_by_age():
+    """Test that categorize_dsst_by_age correctly categorizes DSST scores based on age."""
+    # Create a test DataFrame with age and DSST scores
+    test_data = pd.DataFrame({
+        "RIDAGEYR": [65, 67, 70, 72, 75, 77, 80, 82, 85, 90],
+        "CFDDS": [60, 40, 56, 45, 51, 33, 47, 29, 42, 24]
+    })
+
+    # Call the function
+    result = data.categorize_dsst_by_age(test_data)
+
+    # Check that the result is a DataFrame
+    assert isinstance(result, pd.DataFrame)
+
+    # Check that the dummy columns were created
+    assert "DSST_High" in result.columns
+    assert "DSST_Average" in result.columns
+    assert "DSST_Low" in result.columns
+
+    # Calculate expected means and standard deviations for each age group
+    # Age 65-69: [60, 40] -> mean=50, sd=14.14
+    # Age 70-74: [56, 45] -> mean=50.5, sd=7.78
+    # Age 75-79: [51, 33] -> mean=42, sd=12.73
+    # Age 80-84: [47, 29] -> mean=38, sd=12.73
+    # Age 85+: [42, 24] -> mean=33, sd=12.73
+
+    # Check that each row is categorized correctly based on the calculated means and SDs
+    # Age 65-69 group
+    age_65_69_scores = test_data[test_data["RIDAGEYR"].between(65, 69)]["CFDDS"]
+    mean_65_69 = age_65_69_scores.mean()
+    sd_65_69 = age_65_69_scores.std()
+
+    # Row 0: 60 (should be High if > mean+sd, Average if between mean-sd and mean+sd, Low if < mean-sd)
+    if 60 > mean_65_69 + sd_65_69:
+        assert result.loc[0, "DSST_High"] == 1
+        assert result.loc[0, "DSST_Average"] == 0
+        assert result.loc[0, "DSST_Low"] == 0
+    elif 60 < mean_65_69 - sd_65_69:
+        assert result.loc[0, "DSST_High"] == 0
+        assert result.loc[0, "DSST_Average"] == 0
+        assert result.loc[0, "DSST_Low"] == 1
+    else:
+        assert result.loc[0, "DSST_High"] == 0
+        assert result.loc[0, "DSST_Average"] == 1
+        assert result.loc[0, "DSST_Low"] == 0
+
+    # Row 1: 40 (should be High if > mean+sd, Average if between mean-sd and mean+sd, Low if < mean-sd)
+    if 40 > mean_65_69 + sd_65_69:
+        assert result.loc[1, "DSST_High"] == 1
+        assert result.loc[1, "DSST_Average"] == 0
+        assert result.loc[1, "DSST_Low"] == 0
+    elif 40 < mean_65_69 - sd_65_69:
+        assert result.loc[1, "DSST_High"] == 0
+        assert result.loc[1, "DSST_Average"] == 0
+        assert result.loc[1, "DSST_Low"] == 1
+    else:
+        assert result.loc[1, "DSST_High"] == 0
+        assert result.loc[1, "DSST_Average"] == 1
+        assert result.loc[1, "DSST_Low"] == 0
+
+    # Age 70-74 group
+    age_70_74_scores = test_data[test_data["RIDAGEYR"].between(70, 74)]["CFDDS"]
+    mean_70_74 = age_70_74_scores.mean()
+    sd_70_74 = age_70_74_scores.std()
+
+    # Row 2: 56 (should be High if > mean+sd, Average if between mean-sd and mean+sd, Low if < mean-sd)
+    if 56 > mean_70_74 + sd_70_74:
+        assert result.loc[2, "DSST_High"] == 1
+        assert result.loc[2, "DSST_Average"] == 0
+        assert result.loc[2, "DSST_Low"] == 0
+    elif 56 < mean_70_74 - sd_70_74:
+        assert result.loc[2, "DSST_High"] == 0
+        assert result.loc[2, "DSST_Average"] == 0
+        assert result.loc[2, "DSST_Low"] == 1
+    else:
+        assert result.loc[2, "DSST_High"] == 0
+        assert result.loc[2, "DSST_Average"] == 1
+        assert result.loc[2, "DSST_Low"] == 0
+
+    # Row 3: 45 (should be High if > mean+sd, Average if between mean-sd and mean+sd, Low if < mean-sd)
+    if 45 > mean_70_74 + sd_70_74:
+        assert result.loc[3, "DSST_High"] == 1
+        assert result.loc[3, "DSST_Average"] == 0
+        assert result.loc[3, "DSST_Low"] == 0
+    elif 45 < mean_70_74 - sd_70_74:
+        assert result.loc[3, "DSST_High"] == 0
+        assert result.loc[3, "DSST_Average"] == 0
+        assert result.loc[3, "DSST_Low"] == 1
+    else:
+        assert result.loc[3, "DSST_High"] == 0
+        assert result.loc[3, "DSST_Average"] == 1
+        assert result.loc[3, "DSST_Low"] == 0
+
+    # Test with CFDRIGHT instead of CFDDS
+    test_data_right = pd.DataFrame({
+        "RIDAGEYR": [65, 70, 75, 80, 85],
+        "CFDRIGHT": [60, 56, 51, 47, 42]
+    })
+
+    # Call the function
+    result_right = data.categorize_dsst_by_age(test_data_right)
+
+    # Check that the dummy columns were created
+    assert "DSST_High" in result_right.columns
+    assert "DSST_Average" in result_right.columns
+    assert "DSST_Low" in result_right.columns
+
+    # For CFDRIGHT, we only have one value per age group, so the SD will be 0 (or 1.0 after the minimum SD check)
+    # This means all values should be categorized as "Average" since they equal the mean
+    # Check that all rows are categorized as "Average"
+    for i in range(len(test_data_right)):
+        assert result_right.loc[i, "DSST_Average"] == 1
+        assert result_right.loc[i, "DSST_High"] == 0
+        assert result_right.loc[i, "DSST_Low"] == 0
+
+
 def test_apply_qc_rules():
     """Test that apply_qc_rules correctly applies QC rules to the dataset."""
     # Create a test DataFrame with variables that should be removed by each rule

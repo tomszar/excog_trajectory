@@ -469,6 +469,110 @@ def download_nhanes_data(
 
     return output_path
 
+def categorize_dsst_by_age(data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Categorize DSST (Digit Symbol Substitution Test) scores based on age-specific means.
+
+    Categories:
+    - High: greater than 1 SD above the mean
+    - Average: within 1 SD of the mean
+    - Low: less than 1 SD below the mean
+
+    Age brackets used for calculation:
+    - 65-69 years
+    - 70-74 years
+    - 75-79 years
+    - 80-84 years
+    - 85+ years
+
+    The mean and standard deviation for each age bracket are calculated from the data.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing the NHANES data with CFDDS/CFDRIGHT and RIDAGEYR columns
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with added dummy columns for DSST categories (DSST_High, DSST_Average, DSST_Low)
+    """
+    # Create a copy of the data
+    result = data.copy()
+
+    # Determine which cognitive variable is present (CFDDS or CFDRIGHT)
+    dsst_var = None
+    if "CFDDS" in result.columns:
+        dsst_var = "CFDDS"
+    elif "CFDRIGHT" in result.columns:
+        dsst_var = "CFDRIGHT"
+    else:
+        # If neither variable is present, return the original data
+        print("Warning: Neither CFDDS nor CFDRIGHT found in the data. Skipping DSST categorization.")
+        return result
+
+    # Check if age variable is present
+    if "RIDAGEYR" not in result.columns:
+        print("Warning: RIDAGEYR not found in the data. Skipping DSST categorization.")
+        return result
+
+    # Define age brackets
+    age_brackets = [
+        (65, 69),
+        (70, 74),
+        (75, 79),
+        (80, 999), # 999 as an upper bound for 80+
+    ]
+
+    # Initialize dictionary to store means and standard deviations
+    age_stats = {}
+
+    # Calculate mean and standard deviation for each age bracket
+    for age_min, age_max in age_brackets:
+        # Create mask for this age group
+        age_mask = (result["RIDAGEYR"] >= age_min) & (result["RIDAGEYR"] <= age_max)
+
+        # Get DSST scores for this age group
+        age_group_scores = result.loc[age_mask, dsst_var].dropna()
+
+        # Calculate mean and standard deviation if there are scores in this age group
+        if len(age_group_scores) > 0:
+            mean = age_group_scores.mean()
+            sd = age_group_scores.std()
+            # Use a minimum standard deviation to avoid division by zero or very small values
+            if pd.isna(sd) or sd < 1e-6:
+                sd = 1.0
+            age_stats[(age_min, age_max)] = (mean, sd)
+        else:
+            # If no scores in this age group, use a default mean and sd
+            print(f"Warning: No DSST scores for age group {age_min}-{age_max}. Using default values.")
+            age_stats[(age_min, age_max)] = (0, 1)
+
+    # Initialize dummy columns with zeros
+    result["DSST_High"] = 0
+    result["DSST_Average"] = 0
+    result["DSST_Low"] = 0
+
+    # Categorize based on age and DSST score
+    for (age_min, age_max), (mean, sd) in age_stats.items():
+        # Create mask for this age group
+        age_mask = (result["RIDAGEYR"] >= age_min) & (result["RIDAGEYR"] <= age_max)
+
+        # Apply categorization for this age group
+        # High: greater than 1 SD above the mean
+        high_mask = age_mask & (result[dsst_var] > (mean + sd))
+        result.loc[high_mask, "DSST_High"] = 1
+
+        # Average: within 1 SD of the mean
+        avg_mask = age_mask & (result[dsst_var] >= (mean - sd)) & (result[dsst_var] <= (mean + sd))
+        result.loc[avg_mask, "DSST_Average"] = 1
+
+        # Low: less than 1 SD below the mean
+        low_mask = age_mask & (result[dsst_var] < (mean - sd))
+        result.loc[low_mask, "DSST_Low"] = 1
+
+    return result
+
 
 def apply_qc_rules(
         data: pd.DataFrame,
@@ -656,6 +760,9 @@ def apply_qc_rules(
 
     # Use filter_variables to get the final dataset with both the passing QC variables and the excluded variables
     result = filter_variables(data_qc, vars_passing_qc, ordered_vars)
+
+    # Apply DSST categorization based on age and cognitive scores
+    result = categorize_dsst_by_age(result)
 
     return result
 

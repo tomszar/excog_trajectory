@@ -226,6 +226,7 @@ def clean_data(args):
 
     # Define variables for analysis using the cols module
     cognitive_vars = columns.COGNITIVE_VARS  # Cognitive function right responses
+    cognitive_cats = columns.COGNITIVE_CAT  # Cognitive categories
     covariates = columns.COVARIATES  # Demographics and survey cycle
     cols_to_drop_na = cognitive_vars + covariates
     cols_to_drop = columns.COLS_TO_DROP  # Columns to drop
@@ -248,7 +249,7 @@ def clean_data(args):
                                                covariates=covariates,
                                                standardize=True,
                                                log2_transform=True)
-
+        data.categorize_dsst_by_age(nhanes_data[dat])
         # Save the individual cleaned datasets
         output_file = os.path.join(args.output_data, f"cleaned_nhanes_{dat}.csv")
         nhanes_data[dat].to_csv(output_file, index=True)
@@ -268,7 +269,7 @@ def clean_data(args):
         # Get exposure variables using the cols module
         exposure_vars = columns.get_exposure_vars(
             data=nhanes_data[dat],
-            cognitive_vars=cognitive_vars,
+            cognitive_vars=cognitive_vars + cognitive_cats,
             covariates=covariates
         )
 
@@ -386,7 +387,7 @@ def clean_data(args):
     # Plot exposure distributions
     fig1 = visualization.plot_distributions(
         data=combined_data,
-        vars=cognitive_vars,
+        vars=["CFDDS"],
         save_path=args.output_dir,
     )
     print(f"Exposure distributions plot saved to {os.path.join(args.output_dir, 'distributions.png')}")
@@ -396,7 +397,7 @@ def clean_data(args):
     # Get exposure variables using the cols module
     exposure_vars = columns.get_exposure_vars(
         data=combined_data,
-        cognitive_vars=cognitive_vars,
+        cognitive_vars=cognitive_vars + cognitive_cats,
         covariates=covariates
     )
     visualization.plot_exposure_correlation_matrix(
@@ -488,6 +489,7 @@ def run_plsr_analysis(args):
     # Define variables for analysis using the cols module
     cognitive_vars = columns.COGNITIVE_VARS  # Using a specific cognitive variable for PLSR
     covariates = columns.COVARIATES  # Demographics and survey cycle
+    cognitive_cats = columns.COGNITIVE_CAT  # Cognitive categories
 
     # Validate cols exist in the dataset
     valid_cognitive_vars = columns.validate_columns(data_df,
@@ -501,7 +503,7 @@ def run_plsr_analysis(args):
     # Get exposure variables using the cols module
     exposure_vars = columns.get_exposure_vars(
         data=data_df,
-        cognitive_vars=valid_cognitive_vars,
+        cognitive_vars=valid_cognitive_vars + cognitive_cats,
         covariates=valid_covariates
     )
     x = data_df[exposure_vars + valid_covariates + dummy_vars]
@@ -550,6 +552,15 @@ def run_plsr_analysis(args):
     import pickle
     with open(os.path.join(args.output_dir, "best_model.pkl"), "wb") as f:
         pickle.dump(best_model, f)
+
+    # Ensure cognitive categories (DSST_High, DSST_Average, DSST_Low) are present in the data
+    # Check if cognitive categories exist in the data
+    cognitive_categories = ["DSST_High", "DSST_Average", "DSST_Low"]
+    missing_categories = [cat for cat in cognitive_categories if cat not in data_df.columns]
+
+    if missing_categories:
+        print(f"Categorizing DSST scores by age to create cognitive categories: {', '.join(cognitive_categories)}")
+        data_df = data.categorize_dsst_by_age(data_df)
 
     # Create scatter plots of the first two columns of x_scores
     plsr_plots = visualization.plot_plsr_scores(
