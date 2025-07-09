@@ -12,7 +12,7 @@ import pandas as pd
 # Define constants for column categories
 IDS = ["SEQN", "sample"]
 COGNITIVE_VARS = ["CFDRIGHT", "CFDDS"]
-COGNITIVE_CAT = ["DSST_High", "DSST_Average", "DSST_Low",]
+COGNITIVE_CAT = ["DSST_Low", "DSST_Average", "DSST_High"]
 COVARIATES = ["Cycle", "RIDAGEYR", "RIAGENDR", "INDFMPIR", "DMDEDUC2", "RIDRETH1"]
 CATEGORICAL_COVARIATES = ["Cycle", "RIAGENDR", "RIDRETH1"]
 COLS_TO_DROP = ["SDDSRVYR", "INDHHINC", "INDHHIN2"]

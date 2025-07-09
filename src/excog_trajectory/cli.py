@@ -8,10 +8,11 @@ of cognitive decline in NHANES data and for downloading NHANES data.
 
 import argparse
 import os
+import pickle
 
 import pandas as pd
 
-from excog_trajectory import analysis, columns, data, visualization
+from excog_trajectory import analysis, columns, data, visualization, trajectory
 
 
 def parse_args():
@@ -78,6 +79,53 @@ def parse_args():
     # Parser for the 'snf' command
     snf_parser = subparsers.add_parser(
         "snf", help="Run Similarity Network Fusion on NHANES data"
+    )
+
+    # Parser for the 'trajectory' command
+    trajectory_parser = subparsers.add_parser(
+        "trajectory",
+        help="Compare cognitive decline trajectories between males and females across DSST categories"
+    )
+    trajectory_parser.add_argument(
+        "--data-path",
+        type=str,
+        default="data/processed/imputed/imputed_nhanes_dat1.csv",
+        help="Path to the imputed data file used in the PLSR analysis"
+    )
+    trajectory_parser.add_argument(
+        "--model-pàth",
+        type=str,
+        default="results/plsr/best_model.pkl",
+        help="Path to the saved PLSR model"
+    )
+    trajectory_parser.add_argument(
+        "--outcome-var",
+        type=str,
+        required=True,
+        help="Name of the cognitive outcome variable"
+    )
+    trajectory_parser.add_argument(
+        "--sex-var",
+        type=str,
+        default="RIAGENDR",
+        help="Name of the sex variable (default: RIAGENDR)"
+    )
+    trajectory_parser.add_argument(
+        "--covariates",
+        type=str,
+        default="RIDAGEYR,RIDRETH1,DMDEDUC2,INDFMPIR",
+        help="Comma-separated list of covariates to include in the model"
+    )
+    trajectory_parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="results/trajectory",
+        help="Directory to save trajectory comparison results and plots"
+    )
+    trajectory_parser.add_argument(
+        "--plot",
+        action="store_true",
+        help="Generate and display trajectory comparison plot"
     )
     snf_parser.add_argument(
         "--data-path",
@@ -549,7 +597,6 @@ def run_plsr_analysis(args):
     print(f"A final model has been trained on the entire dataset using {str(mode)} components.")
 
     # Save the results
-    import pickle
     with open(os.path.join(args.output_dir, "best_model.pkl"), "wb") as f:
         pickle.dump(best_model, f)
 
@@ -667,6 +714,47 @@ def run_snf_analysis(args):
     print("SNF analysis complete!")
 
 
+def run_trajectory_comparison(args):
+    """Run trajectory comparison analysis."""
+    # Create output directory if it doesn't exist
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    print(f"Loading data from {args.data_path}...")
+    if not os.path.exists(args.data_path):
+        print(f"Error: Data file not found at {args.data_path}")
+        return
+
+    # Load data and set it up
+    with open(args.model_path, "rb") as f:
+        model = pickle.load(f)
+    df = pd.read_csv(args.data_path)
+    x_scores = pd.DataFrame(model.x_scores_)
+    x_scores.columns = [f"LV{i+1}" for i in range(x_scores.shape[1])]
+    df_full = pd.concat([df, x_scores], axis=1)
+    df_full.set_index("sample", inplace=True)
+
+    # Here continue with the trajectory comparison
+    covariates = columns.COVARIATES
+    valid_covariates = columns.validate_columns(df, covariates, raise_error=False)
+    covariates_cat = columns.CATEGORICAL_COVARIATES
+    cognitive_cat = columns.COGNITIVE_CAT
+    dummy_vars = columns.get_dummy_vars(df_full, covariates_cat)
+
+    # Create initial model matrix
+    initial_model_matrix = df[cognitive_cat + dummy_vars + valid_covariates]
+
+    # Create proper model matrix using the new function
+    model_matrix = trajectory.create_model_matrix(
+        model_matrix=initial_model_matrix,
+        cognitive_cat=cognitive_cat,
+        dummy_vars=dummy_vars,
+        valid_covariates=valid_covariates,
+        add_interactions=True
+    )
+
+    print(f"Created model matrix with shape: {model_matrix.shape}")
+    print(f"Model matrix columns: {model_matrix.columns.tolist()}")
+
 def main():
     """Main entry point for the CLI."""
     args = parse_args()
@@ -682,6 +770,8 @@ def main():
         run_plsr_analysis(args)
     elif args.command == "snf":
         run_snf_analysis(args)
+    elif args.command == "trajectory":
+        run_trajectory_comparison(args)
     else:
         print(f"Unknown command: {args.command}")
         exit(1)
