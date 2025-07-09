@@ -294,8 +294,8 @@ def RRPP(
     """
     Y = pd.DataFrame(Y)
     betas_red = estimate_betas(model_reduced, Y)
-    y_hat = np.matmul(model_reduced, betas_red)
-    y_hat = pd.DataFrame(y_hat, index=Y.index)
+    y_hat = np.matmul(model_reduced.to_numpy(), betas_red.to_numpy())
+    y_hat = pd.DataFrame(y_hat, index=Y.index, columns=Y.columns)
     y_res = Y - y_hat
     ids = y_res.index
     deltas, angles, shapes = [], [], []
