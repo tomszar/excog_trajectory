@@ -10,7 +10,10 @@ import argparse
 import os
 import pickle
 
+import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D  # Import for 3D plotting
 
 from excog_trajectory import analysis, columns, data, visualization, trajectory
 
@@ -93,39 +96,16 @@ def parse_args():
         help="Path to the imputed data file used in the PLSR analysis"
     )
     trajectory_parser.add_argument(
-        "--model-pàth",
+        "--model-path",
         type=str,
         default="results/plsr/best_model.pkl",
         help="Path to the saved PLSR model"
-    )
-    trajectory_parser.add_argument(
-        "--outcome-var",
-        type=str,
-        required=True,
-        help="Name of the cognitive outcome variable"
-    )
-    trajectory_parser.add_argument(
-        "--sex-var",
-        type=str,
-        default="RIAGENDR",
-        help="Name of the sex variable (default: RIAGENDR)"
-    )
-    trajectory_parser.add_argument(
-        "--covariates",
-        type=str,
-        default="RIDAGEYR,RIDRETH1,DMDEDUC2,INDFMPIR",
-        help="Comma-separated list of covariates to include in the model"
     )
     trajectory_parser.add_argument(
         "--output-dir",
         type=str,
         default="results/trajectory",
         help="Directory to save trajectory comparison results and plots"
-    )
-    trajectory_parser.add_argument(
-        "--plot",
-        action="store_true",
-        help="Generate and display trajectory comparison plot"
     )
     snf_parser.add_argument(
         "--data-path",
@@ -532,7 +512,7 @@ def run_plsr_analysis(args):
     os.makedirs(args.output_dir, exist_ok=True)
 
     print(f"Loading imputed NHANES data from {args.data_path}...")
-    data_df = pd.read_csv(args.data_path)
+    data_df = pd.read_csv(args.data_path, index_col=0)
 
     # Define variables for analysis using the cols module
     cognitive_vars = columns.COGNITIVE_VARS  # Using a specific cognitive variable for PLSR
@@ -554,12 +534,16 @@ def run_plsr_analysis(args):
         cognitive_vars=valid_cognitive_vars + cognitive_cats,
         covariates=valid_covariates
     )
-    x = data_df[exposure_vars + valid_covariates + dummy_vars]
+    x = data_df[exposure_vars]
     y = data_df[valid_cognitive_vars]
 
-    print(f"Running PLSR with {len(exposure_vars)} exposure variables, "
-          f"{len(valid_cognitive_vars)} cognitive variables, "
-          f"and {len(valid_covariates) + len(dummy_vars)} covariates...")
+    print(f"Running PLSR with {len(exposure_vars)} exposure variables, and "
+          f"{len(valid_cognitive_vars)} cognitive variables...")
+
+    if args.max_components > x.shape[1]:
+        print(f"Warning: Number of components ({args.max_components}) is greater than the number of variables ({x.shape[1]}). "
+              f"Setting max_components to {x.shape[1]}.")
+        args.max_components = x.shape[1]
 
     if args.n_repetitions > 1:
         print(
@@ -602,11 +586,10 @@ def run_plsr_analysis(args):
 
     # Ensure cognitive categories (DSST_High, DSST_Average, DSST_Low) are present in the data
     # Check if cognitive categories exist in the data
-    cognitive_categories = ["DSST_High", "DSST_Average", "DSST_Low"]
-    missing_categories = [cat for cat in cognitive_categories if cat not in data_df.columns]
+    missing_categories = [cat for cat in cognitive_cats if cat not in data_df.columns]
 
     if missing_categories:
-        print(f"Categorizing DSST scores by age to create cognitive categories: {', '.join(cognitive_categories)}")
+        print(f"Categorizing DSST scores by age to create cognitive categories: {', '.join(cognitive_cats)}")
         data_df = data.categorize_dsst_by_age(data_df)
 
     # Create scatter plots of the first two columns of x_scores
@@ -751,9 +734,53 @@ def run_trajectory_comparison(args):
         valid_covariates=valid_covariates,
         add_interactions=True
     )
+    reduced_model = trajectory.create_model_matrix(
+        model_matrix=initial_model_matrix,
+        cognitive_cat=cognitive_cat,
+        dummy_vars=dummy_vars,
+        valid_covariates=valid_covariates,
+        add_interactions=False
+    )
 
-    print(f"Created model matrix with shape: {model_matrix.shape}")
-    print(f"Model matrix columns: {model_matrix.columns.tolist()}")
+    y = x_scores
+    betas = trajectory.estimate_betas(model_matrix, y)
+    ls_vectors = trajectory._get_ls_vectors(model_matrix)
+    contrast = [[0,1,2], [3,4,5]]
+    obs_vect = pd.DataFrame(np.matmul(ls_vectors, betas))
+
+    # Set column names for obs_vect to match the LV columns in x_scores
+    obs_vect.columns = [f"LV{i+1}" for i in range(obs_vect.shape[1])]
+
+    deltas, angles, shapes = trajectory.estimate_difference(y,
+                                                            model_matrix,
+                                                            ls_vectors,
+                                                            contrast)
+
+    r_deltas, r_angles, r_shapes = trajectory.RRPP(y,
+                                                   model_matrix,
+                                                   reduced_model,
+                                                   ls_vectors,
+                                                   contrast,
+                                                   9999)
+
+    total_rep = 10000
+    pvals = [
+           (sum(r_angles > angles) / total_rep)[0, 1],
+           (sum(r_deltas > deltas) / total_rep)[0, 1],
+           (sum(r_shapes > shapes) / total_rep)[0, 1],
+       ]
+
+    print(f"Pvalues: {pvals}")
+
+    # Create cognitive trajectory plots using the new function in visualization.py
+    plot_results = visualization.plot_cognitive_trajectory(
+        x_scores=x_scores,
+        obs_vect=obs_vect,
+        output_dir=args.output_dir
+    )
+
+    print(f"Trajectory plots saved to {args.output_dir}")
+
 
 def main():
     """Main entry point for the CLI."""

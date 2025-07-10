@@ -1,6 +1,7 @@
 import pickle
 
 import pandas as pd
+import numpy as np
 
 from excog_trajectory import analysis, columns, data, visualization, trajectory
 
@@ -57,3 +58,13 @@ r_deltas, r_angles, r_shapes = trajectory.RRPP(y,
                                                ls_vectors,
                                                contrast,
                                                9999)
+
+total_rep = 10000
+pvals = [
+       (sum(r_angles > angles) / total_rep)[0, 1],
+       (sum(r_deltas > deltas) / total_rep)[0, 1],
+       (sum(r_shapes > shapes) / total_rep)[0, 1],
+   ]
+
+obs_vect = pd.DataFrame(np.matmul(ls_vectors, betas))
+# TODO: use model.inverse_transform(obs_vect) to get the original scale

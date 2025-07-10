@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.figure import Figure
+from mpl_toolkits.mplot3d import Axes3D  # Import for 3D plotting
 
 
 def plot_distributions(
@@ -254,8 +255,6 @@ def plot_plsr_scores(
     """
     Create scatter plots of selected pairs of columns of x_scores from a PLSR model.
     For n components, shows n/2 plots (rounded up) with pairs like (1,2), (3,4), etc.
-    Highlights the mean values for the x_scores for cognitive categories (DSST_High, DSST_Average, DSST_Low),
-    split by sex (RIAGENDR_1.0 and RIAGENDR_2.0).
 
     Parameters
     ----------
@@ -426,145 +425,256 @@ def plot_plsr_scores(
         # Add the path to the saved plots
         saved_plots["plots"].append(plot_path)
 
-    # Create a new plot highlighting mean values for cognitive categories by sex
-    cognitive_categories = ["DSST_High", "DSST_Average", "DSST_Low"]
-    sex_variables = ["RIAGENDR_1.0", "RIAGENDR_2.0"]
 
-    # Check if cognitive categories and sex variables exist in the data
-    valid_cognitive_categories = [cat for cat in cognitive_categories if cat in data_df.columns]
-    valid_sex_variables = [sex for sex in sex_variables if sex in data_df.columns]
+    return saved_plots
 
-    if valid_cognitive_categories and valid_sex_variables:
-        # Calculate number of plots needed (only showing specific pairs)
-        # For n_components, we'll show n_components/2 plots (rounded up)
-        n_plots = int(np.ceil(n_components / 2))
-        n_rows = int(np.ceil(n_plots / 2))  # 2 plots per row
-        fig, axes = plt.subplots(n_rows, 2, figsize=(figsize[0] * 2, figsize[1] * n_rows))
 
-        # Handle case where there's only one plot
-        if n_plots == 1:
-            axes = np.array([axes])
+def plot_cognitive_trajectory(
+        x_scores: pd.DataFrame,
+        obs_vect: pd.DataFrame,
+        output_dir: str,
+        figsize_2d: Tuple[int, int] = (20, 16),
+        figsize_3d: Tuple[int, int] = (12, 10),
+        dpi: int = 300,
+) -> Dict[str, List[str]]:
+    """
+    Create 2D and 3D plots for cognitive trajectory by sex using obs_vect.
 
-        axes = axes.flatten()
+    Parameters
+    ----------
+    x_scores : pd.DataFrame
+        DataFrame containing the PLSR scores for all samples
+    obs_vect : pd.DataFrame
+        DataFrame containing the values for each cognitive category for each sex
+        using a linear regression that accommodates the inclusion of covariates
+    output_dir : str
+        Directory to save the plots
+    figsize_2d : tuple of int, default=(20, 16)
+        Figure size (width, height) in inches for 2D plots
+    figsize_3d : tuple of int, default=(12, 10)
+        Figure size (width, height) in inches for 3D plot
+    dpi : int, default=300
+        Resolution of the figure in dots per inch
 
-        # Create a combined DataFrame with all x_scores and categories
-        combined_df = pd.DataFrame()
+    Returns
+    -------
+    Dict[str, List[str]]
+        Dictionary containing the paths of the saved plots
+    """
+    # Dictionary to store the paths of saved plots
+    saved_plots = {"plots": []}
 
-        # Add all components to the DataFrame
-        for i in range(n_components):
-            combined_df[f'Component_{i+1}'] = x_scores[:, i]
+    # Create 2D plots for cognitive trajectory by sex using obs_vect
+    n_components = obs_vect.shape[1]
+    n_plots = int(np.ceil(n_components / 2))
+    n_rows = int(np.ceil(n_plots / 2))  # 2 plots per row
 
-        # Add categories and sex variables
-        for cat in valid_cognitive_categories:
-            combined_df[cat] = data_df[cat]
+    # Define cognitive categories and sex labels
+    cognitive_categories = ["Low", "Average", "High"]
+    sex_labels = ["Female", "Male"]
 
-        for sex in valid_sex_variables:
-            combined_df[sex] = data_df[sex]
+    # Define colors and markers
+    colors = {'High': 'green', 'Average': 'blue', 'Low': 'red'}
+    markers = {'Female': 'o', 'Male': 's'}  # circle for females, square for males
 
-        # Define markers and colors
-        markers = {'RIAGENDR_1.0': 'o', 'RIAGENDR_2.0': 's'}  # circle for males, square for females
-        colors = {'DSST_High': 'green', 'DSST_Average': 'blue', 'DSST_Low': 'red'}
+    # Create 2D plots
+    fig, axes = plt.subplots(n_rows, 2, figsize=figsize_2d)
 
-        # Plot specific pairs of components
-        for plot_idx in range(n_plots):
-            if plot_idx < len(axes):
-                ax = axes[plot_idx]
+    # Handle case where there's only one plot
+    if n_plots == 1:
+        axes = np.array([axes])
 
-                # Calculate which components to plot
-                if plot_idx == n_plots - 1 and n_components % 2 == 1:
-                    # For odd number of components, last plot is (n-2, n-1)
-                    comp_i = n_components - 2
-                    comp_j = n_components - 1
-                else:
-                    # Normal case: (0,1), (2,3), (4,5), etc.
-                    comp_i = plot_idx * 2
-                    comp_j = plot_idx * 2 + 1
+    axes = axes.flatten()
 
-                # Make sure we don't exceed the number of components
-                if comp_j < n_components:
-                    # Plot all points with low alpha for context
-                    ax.scatter(
-                        combined_df[f'Component_{comp_i+1}'],
-                        combined_df[f'Component_{comp_j+1}'],
-                        color='lightgray',
-                        alpha=0.1
+    # Plot specific pairs of components
+    for plot_idx in range(n_plots):
+        if plot_idx < len(axes):
+            ax = axes[plot_idx]
+
+            # Calculate which components to plot
+            if plot_idx == n_plots - 1 and n_components % 2 == 1:
+                # For odd number of components, last plot is (n-2, n-1)
+                comp_i = n_components - 2
+                comp_j = n_components - 1
+            else:
+                # Normal case: (0,1), (2,3), (4,5), etc.
+                comp_i = plot_idx * 2
+                comp_j = plot_idx * 2 + 1
+
+            # Make sure we don't exceed the number of components
+            if comp_j < n_components:
+                # Plot all points with low alpha for context
+                ax.scatter(
+                    x_scores.iloc[:, comp_i],
+                    x_scores.iloc[:, comp_j],
+                    color='lightgray',
+                    alpha=0.1
+                )
+
+                # For each sex
+                for sex_idx, sex in enumerate(sex_labels):
+                    # Get indices for this sex in obs_vect
+                    # Female: rows 0-2, Male: rows 3-5
+                    start_idx = sex_idx * 3
+                    end_idx = start_idx + 3
+
+                    # Store points for connecting lines
+                    line_points_x = []
+                    line_points_y = []
+
+                    # For each cognitive category
+                    for cat_idx, cat in enumerate(cognitive_categories):
+                        # Get the corresponding row index in obs_vect
+                        row_idx = start_idx + cat_idx
+
+                        # Get the x and y coordinates from obs_vect
+                        x_coord = obs_vect.iloc[row_idx, comp_i]
+                        y_coord = obs_vect.iloc[row_idx, comp_j]
+
+                        # Store coordinates for connecting lines
+                        line_points_x.append(x_coord)
+                        line_points_y.append(y_coord)
+
+                        # Plot point with larger marker and label
+                        ax.scatter(
+                            x_coord,
+                            y_coord,
+                            color=colors[cat],
+                            marker=markers[sex],
+                            s=150,  # Larger size for visibility
+                            alpha=1.0,
+                            edgecolors='black',
+                            linewidths=1.5,
+                            label=f'{cat} - {sex}' if plot_idx == 0 else ""
+                        )
+
+                    # Connect the points with lines
+                    line_style = '--' if sex == 'Female' else '-'
+                    ax.plot(
+                        line_points_x,
+                        line_points_y,
+                        color='black',
+                        linestyle=line_style,
+                        alpha=0.7,
+                        label=f'{sex} Trajectory' if plot_idx == 0 else ""
                     )
 
-                    # Dictionary to store mean values for connecting lines
-                    mean_values = {}
+                # Add labels
+                ax.set_xlabel(f'Component {comp_i + 1}')
+                ax.set_ylabel(f'Component {comp_j + 1}')
+                ax.set_title(f'Components {comp_i + 1} vs {comp_j + 1}')
 
-                    # Calculate and plot mean values for each combination of cognitive category and sex
-                    for sex in valid_sex_variables:
-                        sex_label = 'Male' if sex == 'RIAGENDR_1.0' else 'Female'
-                        mean_values[sex] = {}
+                # Add a grid
+                ax.grid(True, linestyle='--', alpha=0.3)
 
-                        # Store points for connecting lines
-                        line_points_x = []
-                        line_points_y = []
+                # Set x and y axis limits
+                ax.set_xlim([-1.5, 1.5])
+                ax.set_ylim([-1.5, 1.5])
 
-                        # Plot in the correct order for connecting lines: High -> Average -> Low
-                        for cat in ["DSST_High", "DSST_Average", "DSST_Low"]:
-                            if cat in valid_cognitive_categories:
-                                # Filter points that belong to this category and sex
-                                mask = (combined_df[cat] == 1) & (combined_df[sex] == 1)
+                # Add legend only to the first subplot
+                if plot_idx == 0:
+                    ax.legend(loc='best', fontsize='small')
 
-                                if mask.sum() > 0:  # Only proceed if there are points in this group
-                                    # Calculate mean values
-                                    mean_x = combined_df.loc[mask, f'Component_{comp_i+1}'].mean()
-                                    mean_y = combined_df.loc[mask, f'Component_{comp_j+1}'].mean()
+    # Remove any unused subplots
+    for idx in range(n_plots, len(axes)):
+        fig.delaxes(axes[idx])
 
-                                    # Store mean values for connecting lines
-                                    mean_values[sex][cat] = (mean_x, mean_y)
-                                    line_points_x.append(mean_x)
-                                    line_points_y.append(mean_y)
+    # Add overall title
+    fig.suptitle('Cognitive Trajectory by Sex (Selected Component Pairs)', fontsize=16)
 
-                                    # Plot mean with larger marker and label
-                                    ax.scatter(
-                                        mean_x, 
-                                        mean_y,
-                                        color=colors[cat],
-                                        marker=markers[sex],
-                                        s=150,  # Larger size for visibility
-                                        alpha=1.0,
-                                        edgecolors='black',
-                                        linewidths=1.5,
-                                        label=f'{cat} - {sex_label}' if plot_idx == 0 else ""
-                                    )
+    # Save the plot
+    plt.tight_layout(rect=[0, 0, 0.95, 0.95])
+    plot_path = os.path.join(output_dir, "cognitive_trajectory_2d.png")
+    plt.savefig(plot_path, dpi=dpi)
+    plt.close()
 
-                        # Connect the points with lines if we have at least 2 points
-                        if len(line_points_x) >= 2:
-                            line_style = '-' if sex == 'RIAGENDR_1.0' else '--'
-                            ax.plot(
-                                line_points_x, 
-                                line_points_y, 
-                                color='black', 
-                                linestyle=line_style,
-                                alpha=0.7,
-                                label=f'{sex_label} Trajectory' if plot_idx == 0 else ""
-                            )
+    # Add the path to the saved plots
+    saved_plots["plots"].append(plot_path)
 
-                    # Add labels
-                    ax.set_xlabel(f'Component {comp_i + 1}')
-                    ax.set_ylabel(f'Component {comp_j + 1}')
-                    ax.set_title(f'Components {comp_i + 1} vs {comp_j + 1}')
+    # Create 3D plot if we have at least 3 components
+    if n_components >= 3:
+        fig = plt.figure(figsize=figsize_3d)
+        ax = fig.add_subplot(111, projection='3d')
 
-                    # Add a grid
-                    ax.grid(True, linestyle='--', alpha=0.3)
+        # Plot all points with low alpha for context
+        ax.scatter(
+            x_scores.iloc[:, 0],
+            x_scores.iloc[:, 1],
+            x_scores.iloc[:, 2],
+            color='lightgray',
+            alpha=0.1
+        )
 
-                    # Add legend only to the first subplot
-                    if plot_idx == 0:
-                        ax.legend(loc='best', fontsize='small')
+        # For each sex
+        for sex_idx, sex in enumerate(sex_labels):
+            # Get indices for this sex in obs_vect
+            # Female: rows 0-2, Male: rows 3-5
+            start_idx = sex_idx * 3
+            end_idx = start_idx + 3
 
-        # Remove any unused subplots
-        for idx in range(n_plots, len(axes)):
-            fig.delaxes(axes[idx])
+            # Store points for connecting lines
+            line_points_x = []
+            line_points_y = []
+            line_points_z = []
 
-        # Add overall title
-        fig.suptitle('PLSR Scores - Mean Values by Cognitive Category and Sex (Selected Component Pairs)', fontsize=16)
+            # For each cognitive category
+            for cat_idx, cat in enumerate(cognitive_categories):
+                # Get the corresponding row index in obs_vect
+                row_idx = start_idx + cat_idx
+
+                # Get the x, y, and z coordinates from obs_vect
+                x_coord = obs_vect.iloc[row_idx, 0]
+                y_coord = obs_vect.iloc[row_idx, 1]
+                z_coord = obs_vect.iloc[row_idx, 2]
+
+                # Store coordinates for connecting lines
+                line_points_x.append(x_coord)
+                line_points_y.append(y_coord)
+                line_points_z.append(z_coord)
+
+                # Plot point with larger marker and label
+                ax.scatter(
+                    x_coord,
+                    y_coord,
+                    z_coord,
+                    color=colors[cat],
+                    marker=markers[sex],
+                    s=150,  # Larger size for visibility
+                    alpha=1.0,
+                    edgecolors='black',
+                    linewidths=1.5,
+                    label=f'{cat} - {sex}'
+                )
+
+            # Connect the points with lines
+            line_style = '--' if sex == 'Female' else '-'
+            ax.plot(
+                line_points_x,
+                line_points_y,
+                line_points_z,
+                color='black',
+                linestyle=line_style,
+                alpha=0.7,
+                label=f'{sex} Trajectory'
+            )
+
+        # Add labels
+        ax.set_xlabel('Component 1')
+        ax.set_ylabel('Component 2')
+        ax.set_zlabel('Component 3')
+        ax.set_title('Cognitive Trajectory by Sex (3D)')
+
+        # Add a legend
+        ax.legend(loc='best')
+
+        # Set axis limits
+        ax.set_xlim([-1.5, 1.5])
+        ax.set_ylim([-1.5, 1.5])
+        ax.set_zlim([-1.5, 1.5])
 
         # Save the plot
-        plt.tight_layout(rect=[0, 0, 0.95, 0.95])
-        plot_path = os.path.join(output_dir, "plsr_scores_means_by_category_and_sex.png")
+        plt.tight_layout()
+        plot_path = os.path.join(output_dir, "cognitive_trajectory_3d.png")
         plt.savefig(plot_path, dpi=dpi)
         plt.close()
 
