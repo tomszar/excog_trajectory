@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.cross_decomposition import PLSRegression
 
 # ===========================
 # General Utility Functions
@@ -610,3 +611,50 @@ def _get_ls_vectors(model_matrix: pd.DataFrame) -> np.ndarray:
             ls_vectors[2, interaction_idx] = 1  # Female with high cognition
 
     return ls_vectors
+
+def transform_vectors_to_original(
+        vectors: Union[pd.DataFrame, np.ndarray],
+        plsr_model: PLSRegression
+) -> pd.DataFrame:
+    """
+    Transform a list of vectors (in latent variable space) back to the original X matrix values.
+
+    This function takes vectors in the latent variable space (e.g., LV1, LV2, etc.) and 
+    transforms them back to the original feature space using the PLSR model's x_loadings_.
+
+    Parameters
+    ----------
+    vectors : pd.DataFrame or np.ndarray
+        Vectors in latent variable space to transform.
+    plsr_model : PLSRegression
+        The fitted PLSR model containing x_loadings_ and other attributes.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with the original X matrix values, using the column names from the original X matrix.
+    """
+    # Ensure vectors is a numpy array
+    if isinstance(vectors, pd.DataFrame):
+        vectors_array = vectors.values
+    else:
+        vectors_array = vectors
+
+    # Transform vectors back to original X space
+    # X = T * P^T where T are the scores (vectors) and P are the loadings
+    original_x = np.dot(vectors_array, plsr_model.x_loadings_.T)
+
+    # If the model was scaled, we need to reverse the scaling
+    if hasattr(plsr_model, '_x_mean') and hasattr(plsr_model, '_x_std'):
+        original_x = original_x * plsr_model._x_std + plsr_model._x_mean
+
+    # Create DataFrame with original column names
+    if hasattr(plsr_model, 'feature_names_in_'):
+        column_names = plsr_model.feature_names_in_
+    else:
+        # If feature names are not available, use generic names
+        column_names = [f"X{i+1}" for i in range(original_x.shape[1])]
+
+    result_df = pd.DataFrame(original_x, columns=column_names)
+
+    return result_df

@@ -596,7 +596,7 @@ def run_plsr_analysis(args):
     plsr_plots = visualization.plot_plsr_scores(
         best_model=best_model,
         data_df=data_df,
-        cognitive_vars=valid_cognitive_vars,
+        cognitive_vars=exposure_vars + valid_cognitive_vars,
         output_dir=args.output_dir
     )
 
@@ -716,7 +716,6 @@ def run_trajectory_comparison(args):
     df_full = pd.concat([df, x_scores], axis=1)
     df_full.set_index("sample", inplace=True)
 
-    # Here continue with the trajectory comparison
     covariates = columns.COVARIATES
     valid_covariates = columns.validate_columns(df, covariates, raise_error=False)
     covariates_cat = columns.CATEGORICAL_COVARIATES
@@ -747,9 +746,11 @@ def run_trajectory_comparison(args):
     ls_vectors = trajectory._get_ls_vectors(model_matrix)
     contrast = [[0,1,2], [3,4,5]]
     obs_vect = pd.DataFrame(np.matmul(ls_vectors, betas))
-
     # Set column names for obs_vect to match the LV columns in x_scores
     obs_vect.columns = [f"LV{i+1}" for i in range(obs_vect.shape[1])]
+    obs_vect_transformed = obs_vect.copy()
+    obs_vect_transformed.iloc[[0,1,2],:] -= obs_vect_transformed.iloc[1,:]
+    obs_vect_transformed.iloc[[3,4,5],:] -= obs_vect_transformed.iloc[4,:]
 
     deltas, angles, shapes = trajectory.estimate_difference(y,
                                                             model_matrix,
@@ -780,6 +781,15 @@ def run_trajectory_comparison(args):
     )
 
     print(f"Trajectory plots saved to {args.output_dir}")
+
+    # Transform vectors back to original X matrix values and export to CSV
+    original_x = trajectory.transform_vectors_to_original(obs_vect, model)
+    original_x_path = os.path.join(args.output_dir, "original_x_values.csv")
+    original_x.to_csv(original_x_path, index=False)
+    original_x = trajectory.transform_vectors_to_original(obs_vect_transformed, model)
+    original_x_path = os.path.join(args.output_dir, "original_x_values_transformed.csv")
+    original_x.to_csv(original_x_path, index=False)
+    print(f"Original X matrix values saved to {original_x_path}")
 
 
 def main():

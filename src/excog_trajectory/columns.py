@@ -99,6 +99,7 @@ def get_exposure_vars(data: pd.DataFrame,
         cognitive_vars: List of cognitive variable names
         covariates: List of covariate names
         categorical_covariates: List of categorical covariate names
+        id_vars: List of ID variable names
 
     Returns:
         List of exposure variable names
