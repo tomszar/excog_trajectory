@@ -412,22 +412,24 @@ def clean_data(args):
     print(f"Percentage of missing data saved to {os.path.join(args.output_data, 'percentage_missing.csv')}")
 
     print("Creating visualizations for combined dataset...")
+    exposure_vars = columns.get_exposure_vars(
+        data=combined_data,
+        cognitive_vars=cognitive_vars + cognitive_cats,
+        covariates=covariates
+    )
     # Plot exposure distributions
     fig1 = visualization.plot_distributions(
         data=combined_data,
-        vars=["CFDDS"],
+        vars=["CFDDS"] + exposure_vars,
+        split_by_sex=True,
         save_path=args.output_dir,
+        figsize=(10, 20),
     )
     print(f"Exposure distributions plot saved to {os.path.join(args.output_dir, 'distributions.png')}")
 
     # Create correlation matrix of exposure variables for the combined dataset
     print("Creating correlation matrix of exposure variables for combined dataset...")
     # Get exposure variables using the cols module
-    exposure_vars = columns.get_exposure_vars(
-        data=combined_data,
-        cognitive_vars=cognitive_vars + cognitive_cats,
-        covariates=covariates
-    )
     visualization.plot_exposure_correlation_matrix(
         data=combined_data[exposure_vars],
         fname=os.path.join(args.output_dir, "exposure_correlation_matrix.png"),

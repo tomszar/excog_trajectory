@@ -19,9 +19,10 @@ from mpl_toolkits.mplot3d import Axes3D  # Import for 3D plotting
 def plot_distributions(
         data: pd.DataFrame,
         vars: List[str],
-        n_cols: int = 3,
+        n_cols: int = 2,
         figsize: Tuple[int, int] = (15, 10),
         save_path: Optional[str] = None,
+        split_by_sex: bool = False,
 ) -> Figure | None:
     """
     Create histograms or density plots of variable distributions.
@@ -38,128 +39,72 @@ def plot_distributions(
         Figure size (width, height) in inches
     save_path : str, optional
         Path to save the figure. If None, the figure is not saved.
+    split_by_sex : bool, default=False
+        If True, split distributions by sex categories (0 for females and 1 for males)
+        using the RIAGENDR_1.0 column.
 
     Returns
     -------
     matplotlib.figure.Figure or None
         The created figure object
     """
-    # Placeholder for actual implementation
-    fig, axes = plt.subplots(1, 1, figsize=figsize)
-    axes.hist(data[vars])
+    # Calculate number of rows needed based on number of variables and columns
+    n_vars = len(vars)
+    n_rows = int(np.ceil(n_vars / n_cols))
+
+    # Create figure and axes
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
+
+    # Ensure axes is always a 2D array for consistent indexing
+    if n_vars == 1:
+        axes = np.array([[axes]])
+    elif n_rows == 1:
+        axes = axes.reshape(1, -1)
+
+    # Flatten axes for easier iteration
+    axes_flat = axes.flatten()
+
+    # Plot each variable
+    for i, var in enumerate(vars):
+        if i < len(axes_flat):
+            ax = axes_flat[i]
+
+            if split_by_sex and 'RIAGENDR_1.0' in data.columns:
+                # Split by sex
+                females = data[data['RIAGENDR_1.0'] == 0]
+                males = data[data['RIAGENDR_1.0'] == 1]
+
+                # Plot histograms for females and males
+                if not females.empty and var in females.columns:
+                    ax.hist(females[var], alpha=0.5, label='Female')
+
+                if not males.empty and var in males.columns:
+                    ax.hist(males[var], alpha=0.5, label='Male')
+
+                ax.legend()
+            else:
+                # Plot histogram without splitting
+                if var in data.columns:
+                    ax.hist(data[var])
+
+            # Set title and labels
+            ax.set_title(var)
+            ax.set_xlabel('Value')
+            ax.set_ylabel('Frequency')
+
+    # Hide any unused subplots
+    for j in range(n_vars, len(axes_flat)):
+        axes_flat[j].set_visible(False)
+
+    # Adjust layout
+    plt.tight_layout()
+
+    # Save figure if save_path is provided
     if save_path is not None:
-        fig.savefig(save_path + '/distributions.png', bbox_inches='tight')
+        fig.savefig(os.path.join(save_path, 'distributions.png'), bbox_inches='tight')
         return None
     else:
         return fig
-
-
-def plot_exposure_outcome_relationships(
-        data: pd.DataFrame,
-        outcome_var: str,
-        exposure_vars: List[str],
-        n_cols: int = 3,
-        figsize: Tuple[int, int] = (15, 10),
-        save_path: Optional[str] = None,
-) -> plt.Figure:
-    """
-    Create scatter plots of relationships between exposures and cognitive outcomes.
-
-    Parameters
-    ----------
-    data : pd.DataFrame
-        DataFrame containing exposure and outcome variables
-    outcome_var : str
-        Cognitive outcome variable to plot
-    exposure_vars : list of str
-        List of exposure variables to plot against the outcome
-    n_cols : int, default=3
-        Number of cols in the grid of plots
-    figsize : tuple of int, default=(15, 10)
-        Figure size (width, height) in inches
-    save_path : str, optional
-        Path to save the figure. If None, the figure is not saved.
-
-    Returns
-    -------
-    matplotlib.figure.Figure
-        The created figure object
-    """
-    # Placeholder for actual implementation
-    fig, axes = plt.subplots(1, 1, figsize=figsize)
-    return fig
-
-
-def plot_model_coefficients(
-        model_results: Dict[str, Dict[str, object]],
-        exposure_vars: List[str],
-        figsize: Tuple[int, int] = (12, 8),
-        save_path: Optional[str] = None,
-) -> plt.Figure:
-    """
-    Create forest plots of model coefficients for exposure variables.
-
-    Parameters
-    ----------
-    model_results : Dict[str, Dict[str, object]]
-        Dictionary of model results as returned by run_linear_models()
-    exposure_vars : list of str
-        List of exposure variables to include in the plot
-    figsize : tuple of int, default=(12, 8)
-        Figure size (width, height) in inches
-    save_path : str, optional
-        Path to save the figure. If None, the figure is not saved.
-
-    Returns
-    -------
-    matplotlib.figure.Figure
-        The created figure object
-    """
-    # Placeholder for actual implementation
-    fig, axes = plt.subplots(1, 1, figsize=figsize)
-    return fig
-
-
-def plot_trajectory_curves(
-        longitudinal_results: Dict[str, object],
-        data: pd.DataFrame,
-        time_var: str,
-        outcome_var: str,
-        exposure_var: str,
-        exposure_levels: List[float],
-        figsize: Tuple[int, int] = (10, 6),
-        save_path: Optional[str] = None,
-) -> plt.Figure:
-    """
-    Plot predicted cognitive trajectories at different exposure levels.
-
-    Parameters
-    ----------
-    longitudinal_results : Dict[str, object]
-        Dictionary of longitudinal model results as returned by run_longitudinal_analysis()
-    data : pd.DataFrame
-        DataFrame containing the original data
-    time_var : str
-        Variable indicating time point
-    outcome_var : str
-        Cognitive outcome variable
-    exposure_var : str
-        Exposure variable of interest
-    exposure_levels : list of float
-        Exposure levels at which to plot trajectories
-    figsize : tuple of int, default=(10, 6)
-        Figure size (width, height) in inches
-    save_path : str, optional
-        Path to save the figure. If None, the figure is not saved.
-
-    Returns
-    -------
-    matplotlib.figure.Figure
-        The created figure object
-    """
-    # Placeholder for actual implementation
-    fig, axes = plt.subplots(1, 1, figsize=figsize)
-    return fig
 
 
 def plot_exposure_correlation_matrix(
