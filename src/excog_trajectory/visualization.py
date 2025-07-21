@@ -374,6 +374,153 @@ def plot_plsr_scores(
     return saved_plots
 
 
+def plot_vip_x_scores(
+    vip_x_scores: pd.DataFrame,
+    output_dir: str,
+    figsize: Tuple[int, int] = (12, 10),
+    top_n: int = 20,
+    cmap: str = 'viridis',
+    dpi: int = 300,
+) -> Dict[str, List[str]]:
+    """
+    Create bar plots to illustrate the VIP-X scores per variable for each component and the cumulative scores.
+
+    Parameters
+    ----------
+    vip_x_scores : pd.DataFrame
+        DataFrame containing VIP-X scores for each predictor variable per component and cumulative
+    output_dir : str
+        Directory to save the plots
+    figsize : tuple of int, default=(12, 10)
+        Figure size (width, height) in inches
+    top_n : int, default=20
+        Number of top variables to show in each plot
+    cmap : str, default='viridis'
+        Colormap to use for the bar plots
+    dpi : int, default=300
+        Resolution of the figure in dots per inch
+
+    Returns
+    -------
+    Dict[str, List[str]]
+        Dictionary containing the paths of the saved plots
+    """
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Dictionary to store the paths of saved plots
+    saved_plots = {"plots": []}
+
+    # Get the number of components
+    n_components = len(vip_x_scores.columns) - 1  # Subtract 1 for the 'Cumulative' column
+
+    # Create a color map
+    colors = plt.cm.get_cmap(cmap, n_components + 1)
+
+    # Plot cumulative VIP-X scores
+    plt.figure(figsize=figsize)
+
+    # Sort by cumulative VIP-X scores and get top_n variables
+    top_vars_cumulative = vip_x_scores.sort_values('Cumulative', ascending=False).head(top_n)
+
+    # Create horizontal bar plot
+    bars = plt.barh(top_vars_cumulative.index, top_vars_cumulative['Cumulative'], color=colors(n_components))
+
+    # Add labels and title
+    plt.xlabel('VIP-X Score')
+    plt.ylabel('Variable')
+    plt.title(f'Top {top_n} Variables by Cumulative VIP-X Score')
+    plt.grid(axis='x', linestyle='--', alpha=0.7)
+
+    # Add a reference line at VIP-X = 1
+    plt.axvline(x=1, color='red', linestyle='--', alpha=0.7)
+
+    # Adjust layout
+    plt.tight_layout()
+
+    # Save the plot
+    cumulative_plot_path = os.path.join(output_dir, 'vip_x_cumulative.png')
+    plt.savefig(cumulative_plot_path, dpi=dpi)
+    plt.close()
+
+    saved_plots["plots"].append(cumulative_plot_path)
+
+    # Plot VIP-X scores for each component
+    for comp in range(n_components):
+        comp_name = f'Component_{comp+1}'
+
+        plt.figure(figsize=figsize)
+
+        # Sort by component VIP-X scores and get top_n variables
+        top_vars_comp = vip_x_scores.sort_values(comp_name, ascending=False).head(top_n)
+
+        # Create horizontal bar plot
+        bars = plt.barh(top_vars_comp.index, top_vars_comp[comp_name], color=colors(comp))
+
+        # Add labels and title
+        plt.xlabel('VIP-X Score')
+        plt.ylabel('Variable')
+        plt.title(f'Top {top_n} Variables by VIP-X Score for {comp_name}')
+        plt.grid(axis='x', linestyle='--', alpha=0.7)
+
+        # Add a reference line at VIP-X = 1
+        plt.axvline(x=1, color='red', linestyle='--', alpha=0.7)
+
+        # Adjust layout
+        plt.tight_layout()
+
+        # Save the plot
+        comp_plot_path = os.path.join(output_dir, f'vip_x_{comp_name}.png')
+        plt.savefig(comp_plot_path, dpi=dpi)
+        plt.close()
+
+        saved_plots["plots"].append(comp_plot_path)
+
+    # Create a combined plot showing all components and cumulative scores
+    # This is useful for comparing the importance of variables across components
+
+    # Get the top variables based on cumulative scores
+    top_vars_overall = vip_x_scores.sort_values('Cumulative', ascending=False).head(top_n)
+
+    # Create a figure with a larger width to accommodate the legend
+    plt.figure(figsize=(figsize[0] + 2, figsize[1]))
+
+    # Plot each component and cumulative scores
+    bar_width = 0.8 / (n_components + 1)  # Width of each bar
+
+    for i, col in enumerate(vip_x_scores.columns):
+        # Calculate position for this set of bars
+        pos = np.arange(len(top_vars_overall.index)) - 0.4 + i * bar_width
+
+        # Create bars
+        plt.barh(pos, top_vars_overall[col], height=bar_width, 
+                label=col, color=colors(i), alpha=0.7)
+
+    # Add labels and title
+    plt.xlabel('VIP-X Score')
+    plt.yticks(np.arange(len(top_vars_overall.index)), top_vars_overall.index)
+    plt.title(f'Top {top_n} Variables by VIP-X Score Across All Components')
+    plt.grid(axis='x', linestyle='--', alpha=0.7)
+
+    # Add a reference line at VIP-X = 1
+    plt.axvline(x=1, color='red', linestyle='--', alpha=0.7)
+
+    # Add legend
+    plt.legend(loc='best')
+
+    # Adjust layout
+    plt.tight_layout()
+
+    # Save the plot
+    combined_plot_path = os.path.join(output_dir, 'vip_x_combined.png')
+    plt.savefig(combined_plot_path, dpi=dpi)
+    plt.close()
+
+    saved_plots["plots"].append(combined_plot_path)
+
+    return saved_plots
+
+
 def plot_cognitive_trajectory(
         x_scores: pd.DataFrame,
         obs_vect: pd.DataFrame,

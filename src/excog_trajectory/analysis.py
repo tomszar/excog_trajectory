@@ -172,6 +172,65 @@ def _plsda_r2(
     return r2_score
 
 
+def calculate_vip_x_scores(model: PLSRegression, X: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate VIP-X scores (Variable Importance in Projection for X) from a fitted PLSRegression model.
+
+    VIP-X scores measure the contribution of each predictor variable to the PLS model.
+    The function calculates both cumulative VIP-X scores across all components and
+    individual VIP-X scores for each component.
+
+    Parameters
+    ----------
+    model : PLSRegression
+        A fitted PLSRegression model
+    X : pd.DataFrame
+        The predictor variables used to fit the model
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing VIP-X scores for each predictor variable per component
+        and the overall cumulative score
+    """
+    # Get model parameters
+    n_components = model.n_components
+    n_features = X.shape[1]
+    feature_names = X.columns
+
+    # Get X-loadings (p) and weights (w)
+    loadings = model.x_loadings_
+    weights = model.x_weights_
+
+    # Calculate variance explained in X by each component
+    # This is proportional to the sum of squares of the X-loadings
+    ss_loadings = np.sum(loadings**2, axis=0)
+
+    # Initialize DataFrame to store VIP-X scores
+    vip_scores = pd.DataFrame(index=feature_names)
+
+    # Calculate VIP-X scores for each component
+    for comp in range(n_components):
+        # Calculate VIP-X for this component
+        vip_comp = np.sqrt(n_features * (weights[:, comp]**2) / np.sum(weights[:, comp]**2))
+        vip_scores[f'Component_{comp+1}'] = vip_comp
+
+    # Calculate cumulative VIP-X scores across all components
+    # Using the formula: VIP_j = sqrt(p * sum_a(w_aj^2 * SSX_a) / sum_a(SSX_a))
+    vip_cumulative = np.zeros(n_features)
+
+    for j in range(n_features):
+        numerator = 0
+        for a in range(n_components):
+            numerator += weights[j, a]**2 * ss_loadings[a]
+
+        vip_cumulative[j] = np.sqrt(n_features * numerator / np.sum(ss_loadings))
+
+    vip_scores['Cumulative'] = vip_cumulative
+
+    return vip_scores
+
+
 def run_snf(
         data: pd.DataFrame,
         exposure_categories: Dict[str, List[str]],

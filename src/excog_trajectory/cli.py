@@ -12,8 +12,6 @@ import pickle
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D  # Import for 3D plotting
 
 from excog_trajectory import analysis, columns, data, visualization, trajectory
 
@@ -594,6 +592,29 @@ def run_plsr_analysis(args):
         print(f"Categorizing DSST scores by age to create cognitive categories: {', '.join(cognitive_cats)}")
         data_df = data.categorize_dsst_by_age(data_df)
 
+    # Calculate VIP-X scores
+    print("Calculating VIP-X scores...")
+    vip_x_scores = analysis.calculate_vip_x_scores(best_model, x)
+
+    # Save VIP-X scores to CSV
+    vip_x_file = os.path.join(args.output_dir, "vip_x_scores.csv")
+    vip_x_scores.to_csv(vip_x_file)
+    print(f"VIP-X scores saved to {vip_x_file}")
+
+    # Create visualization of VIP-X scores
+    vip_x_plots = visualization.plot_vip_x_scores(
+        vip_x_scores=vip_x_scores,
+        output_dir=args.output_dir
+    )
+
+    # Print information about the saved VIP-X plots
+    if vip_x_plots["plots"]:
+        print("VIP-X score plots saved to:")
+        for plot_path in vip_x_plots["plots"]:
+            print(f"  - {plot_path}")
+    else:
+        print("No VIP-X score plots were created.")
+
     # Create scatter plots of the first two columns of x_scores
     plsr_plots = visualization.plot_plsr_scores(
         best_model=best_model,
@@ -774,6 +795,15 @@ def run_trajectory_comparison(args):
        ]
 
     print(f"Pvalues: {pvals}")
+
+    # Export p-values to CSV
+    pval_df = pd.DataFrame({
+        'comparison_type': ['orientation', 'magnitude', 'shape'],
+        'pvalue': pvals
+    })
+    pval_path = os.path.join(args.output_dir, "pvalues.csv")
+    pval_df.to_csv(pval_path, index=False)
+    print(f"P-values exported to {pval_path}")
 
     # Create cognitive trajectory plots using the new function in visualization.py
     plot_results = visualization.plot_cognitive_trajectory(
