@@ -794,8 +794,6 @@ def run_trajectory_comparison(args):
            (sum(r_shapes > shapes) / total_rep)[0, 1],
        ]
 
-    print(f"Pvalues: {pvals}")
-
     # Export p-values to CSV
     pval_df = pd.DataFrame({
         'comparison_type': ['orientation', 'magnitude', 'shape'],
@@ -806,11 +804,14 @@ def run_trajectory_comparison(args):
     print(f"P-values exported to {pval_path}")
 
     # Create cognitive trajectory plots using the new function in visualization.py
-    plot_results = visualization.plot_cognitive_trajectory(
-        x_scores=x_scores,
-        obs_vect=obs_vect,
-        output_dir=args.output_dir
-    )
+    plot_names = ["cognitive_trajectory", "cognitive_trajectory_transformed"]
+    for i, vect in enumerate([obs_vect, obs_vect_transformed]):
+        visualization.plot_cognitive_trajectory(
+            x_scores=x_scores,
+            obs_vect=vect,
+            output_dir=args.output_dir,
+            filename=plot_names[i],
+        )
 
     print(f"Trajectory plots saved to {args.output_dir}")
 

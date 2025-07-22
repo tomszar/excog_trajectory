@@ -525,6 +525,7 @@ def plot_cognitive_trajectory(
         x_scores: pd.DataFrame,
         obs_vect: pd.DataFrame,
         output_dir: str,
+        filename: str = "cognitive_trajectory",
         figsize_2d: Tuple[int, int] = (20, 16),
         figsize_3d: Tuple[int, int] = (12, 10),
         dpi: int = 300,
@@ -676,7 +677,7 @@ def plot_cognitive_trajectory(
 
     # Save the plot
     plt.tight_layout(rect=[0, 0, 0.95, 0.95])
-    plot_path = os.path.join(output_dir, "cognitive_trajectory_2d.png")
+    plot_path = os.path.join(output_dir, filename + "_2d.png")
     plt.savefig(plot_path, dpi=dpi)
     plt.close()
 
@@ -766,7 +767,7 @@ def plot_cognitive_trajectory(
 
         # Save the plot
         plt.tight_layout()
-        plot_path = os.path.join(output_dir, "cognitive_trajectory_3d.png")
+        plot_path = os.path.join(output_dir, filename + "_3d.png")
         plt.savefig(plot_path, dpi=dpi)
         plt.close()
 
