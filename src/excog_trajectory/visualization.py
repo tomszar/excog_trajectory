@@ -298,7 +298,7 @@ def plot_plsr_scores(
         fig.suptitle(f'PLSR Scores - Selected Component Pairs (Coded by {cog_var})', fontsize=16)
 
         # Save the plot
-        plt.tight_layout(rect=[0, 0, 0.9, 0.95])
+        plt.tight_layout()
         plot_path = os.path.join(output_dir, f"plsr_scores_scatter_{cog_var}.png")
         plt.savefig(plot_path, dpi=dpi)
         plt.close()

@@ -1,19 +1,18 @@
-from typing import Union, List, Tuple, Optional
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+from sklearn.cross_decomposition import PLSRegression
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.cross_decomposition import PLSRegression
 
 # ===========================
 # General Utility Functions
 # ===========================
 
+
 def center_matrix(
-    df: pd.DataFrame,
-    group_col: str,
-    exclude_cols: Optional[List[str]] = None
+    df: pd.DataFrame, group_col: str, exclude_cols: Optional[List[str]] = None
 ) -> pd.DataFrame:
     """
     Center a matrix grouped by a categorical variable.
@@ -40,10 +39,11 @@ def center_matrix(
         centered_df.loc[mask, dat_num.columns] = dat_num.loc[mask, :] - mean
     return centered_df
 
+
 def get_model_matrix(
     X: pd.DataFrame,
     drop_indices: Optional[List[int]] = None,
-    add_interactions: bool = True
+    add_interactions: bool = True,
 ) -> np.ndarray:
     """
     Generate a model (design) matrix from categorical factors.
@@ -82,7 +82,7 @@ def create_model_matrix(
     cognitive_cat: List[str],
     dummy_vars: List[str],
     valid_covariates: List[str],
-    add_interactions: bool = True
+    add_interactions: bool = True,
 ) -> pd.DataFrame:
     """
     Create a proper model matrix for trajectory analysis.
@@ -124,7 +124,7 @@ def create_model_matrix(
     # Group dummy variables by their prefix
     dummy_prefixes = set()
     for dummy in dummy_vars:
-        prefix = dummy.split('_')[0] + '_'
+        prefix = dummy.split("_")[0] + "_"
         dummy_prefixes.add(prefix)
 
     # For each prefix, drop the first dummy variable
@@ -152,6 +152,7 @@ def create_model_matrix(
 
     return df
 
+
 def pair_difference(
     df: pd.DataFrame,
     group_col: str,
@@ -160,7 +161,7 @@ def pair_difference(
     state2: str,
     group1: str,
     group2: str,
-    feature_cols: Optional[List[str]] = None
+    feature_cols: Optional[List[str]] = None,
 ) -> Tuple[float, float]:
     """
     Estimate vector difference in magnitude and direction between two states, grouped.
@@ -202,6 +203,7 @@ def pair_difference(
     cos_angle = np.clip(np.inner(vec1, vec2) / (mag1 * mag2), -1.0, 1.0)
     angle = np.arccos(cos_angle) * 180 / np.pi
     return angle, delta
+
 
 def estimate_difference(
     Y: Union[pd.DataFrame, np.ndarray],
@@ -258,6 +260,7 @@ def estimate_difference(
             comp += 1
     return deltas, angles, shapes
 
+
 def RRPP(
     Y: Union[pd.DataFrame, np.ndarray],
     model_full: Union[pd.DataFrame, np.ndarray],
@@ -311,9 +314,9 @@ def RRPP(
         shapes.append(s)
     return deltas, angles, shapes
 
+
 def estimate_betas(
-    X: Union[pd.DataFrame, np.ndarray],
-    Y: Union[pd.DataFrame, np.ndarray]
+    X: Union[pd.DataFrame, np.ndarray], Y: Union[pd.DataFrame, np.ndarray]
 ) -> np.ndarray:
     """
     Estimate the beta coefficients between an outcome matrix and a model matrix.
@@ -335,10 +338,8 @@ def estimate_betas(
     betas = np.matmul(np.linalg.inv(left), right)
     return betas
 
-def get_observed_vectors(
-    X: pd.DataFrame,
-    Y: pd.DataFrame
-) -> np.ndarray:
+
+def get_observed_vectors(X: pd.DataFrame, Y: pd.DataFrame) -> np.ndarray:
     """
     Get means, or observed vectors, from standard LS vectors.
 
@@ -357,7 +358,6 @@ def get_observed_vectors(
     model_full = get_model_matrix(X)
     betas = estimate_betas(model_full, Y)
 
-
     # Convert model_full to DataFrame with column names for _get_ls_vectors
     model_df = pd.DataFrame(model_full)
     # Assign column names based on X's structure
@@ -368,9 +368,11 @@ def get_observed_vectors(
     means = np.matmul(ls_matrix, betas)
     return means
 
+
 # ===========================
 # Private/Helper Functions
 # ===========================
+
 
 def _estimate_size(obs_vect: pd.DataFrame, levels: List[int]) -> float:
     """
@@ -397,6 +399,7 @@ def _estimate_size(obs_vect: pd.DataFrame, levels: List[int]) -> float:
         d = np.linalg.norm(y)
         size += d
     return size
+
 
 def _estimate_orientation(
     obs_vect: pd.DataFrame,
@@ -430,9 +433,9 @@ def _estimate_orientation(
         orientation = -orientation
     return orientation
 
+
 def _estimate_shape(
-    vectors: Union[pd.DataFrame, np.ndarray],
-    contrast: List[List[int]]
+    vectors: Union[pd.DataFrame, np.ndarray], contrast: List[List[int]]
 ) -> np.ndarray:
     """
     Align shapes using procrustes superimposition and estimate shape differences.
@@ -462,7 +465,7 @@ def _estimate_shape(
     # Scale to centroid size
     for levels in contrast:
         centroid = vect_c[levels, :].mean(axis=0)
-        cs = np.sqrt(np.sum((vect_c[levels, :] - centroid)**2))
+        cs = np.sqrt(np.sum((vect_c[levels, :] - centroid) ** 2))
         vect_c[levels, :] /= cs
     # Get baseline Euclidean distance
     Qm1 = euclidean_distances(vect_c.reshape((n_groups, n_dimensions * n_levels)))
@@ -473,7 +476,11 @@ def _estimate_shape(
     while abs(Q) > 1e-5:
         for i, levels in enumerate(contrast):
             b = [x for idx, x in enumerate(contrast) if idx != i]
-            M = np.mean([temp1[lev] for lev in b], axis=0) if len(b) > 1 else temp1[b[0]]
+            M = (
+                np.mean([temp1[lev] for lev in b], axis=0)
+                if len(b) > 1
+                else temp1[b[0]]
+            )
             Mp2 = _OPA(M, temp1[levels])
             temp2[levels] = Mp2
         Qm2 = euclidean_distances(temp2.reshape((n_groups, n_dimensions * n_levels)))
@@ -483,6 +490,7 @@ def _estimate_shape(
         iter_count += 1
     shape_distance = Qm2
     return shape_distance
+
 
 def _OPA(M1: np.ndarray, M2: np.ndarray) -> np.ndarray:
     """
@@ -508,6 +516,7 @@ def _OPA(M1: np.ndarray, M2: np.ndarray) -> np.ndarray:
     H = V @ D @ U.T
     Mp2 = M2 @ H
     return Mp2
+
 
 def _get_ls_vectors(model_matrix: pd.DataFrame) -> np.ndarray:
     """
@@ -612,27 +621,47 @@ def _get_ls_vectors(model_matrix: pd.DataFrame) -> np.ndarray:
 
     return ls_vectors
 
+
 def transform_vectors_to_original(
-        vectors: Union[pd.DataFrame, np.ndarray],
-        plsr_model: PLSRegression
+    vectors: Union[pd.DataFrame, np.ndarray],
+    plsr_model: Optional[PLSRegression] = None,
+    *,
+    x_loadings: Optional[np.ndarray] = None,
+    x_mean: Optional[np.ndarray] = None,
+    x_std: Optional[np.ndarray] = None,
+    feature_names: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """
     Transform a list of vectors (in latent variable space) back to the original X matrix values.
 
-    This function takes vectors in the latent variable space (e.g., LV1, LV2, etc.) and 
-    transforms them back to the original feature space using the PLSR model's x_loadings_.
+    This function takes vectors in the latent variable space (e.g., LV1, LV2, etc.) and
+    transforms them back to the original feature space using either a PLSR model or
+    the individual components (x_loadings, x_mean, x_std, feature_names).
 
     Parameters
     ----------
     vectors : pd.DataFrame or np.ndarray
         Vectors in latent variable space to transform.
-    plsr_model : PLSRegression
+    plsr_model : PLSRegression, optional
         The fitted PLSR model containing x_loadings_ and other attributes.
+        If provided, the individual components parameters are ignored.
+    x_loadings : np.ndarray, optional
+        The x_loadings_ matrix from a PLSR model. Required if plsr_model is not provided.
+    x_mean : np.ndarray, optional
+        The mean values used for scaling X in the PLSR model.
+    x_std : np.ndarray, optional
+        The standard deviation values used for scaling X in the PLSR model.
+    feature_names : List[str], optional
+        The feature names from the original X matrix. If not provided, generic names will be used.
 
     Returns
     -------
     pd.DataFrame
         DataFrame with the original X matrix values, using the column names from the original X matrix.
+
+    Notes
+    -----
+    Either plsr_model or x_loadings must be provided.
     """
     # Ensure vectors is a numpy array
     if isinstance(vectors, pd.DataFrame):
@@ -640,19 +669,41 @@ def transform_vectors_to_original(
     else:
         vectors_array = vectors
 
+    # Get the required components either from the model or from the parameters
+    if plsr_model is not None:
+        # Use the PLSR model attributes
+        loadings = plsr_model.x_loadings_
+
+        # Check if the model has scaling attributes
+        has_scaling = hasattr(plsr_model, "_x_mean") and hasattr(plsr_model, "_x_std")
+        mean_values = plsr_model._x_mean if has_scaling else None
+        std_values = plsr_model._x_std if has_scaling else None
+
+        # Get feature names if available
+        if hasattr(plsr_model, "feature_names_in_"):
+            column_names = plsr_model.feature_names_in_
+        else:
+            column_names = None
+    else:
+        # Use the provided parameters
+        if x_loadings is None:
+            raise ValueError("Either plsr_model or x_loadings must be provided")
+
+        loadings = x_loadings
+        mean_values = x_mean
+        std_values = x_std
+        column_names = feature_names
+
     # Transform vectors back to original X space
     # X = T * P^T where T are the scores (vectors) and P are the loadings
-    original_x = np.dot(vectors_array, plsr_model.x_loadings_.T)
+    original_x = np.dot(vectors_array, loadings.T)
 
-    # If the model was scaled, we need to reverse the scaling
-    if hasattr(plsr_model, '_x_mean') and hasattr(plsr_model, '_x_std'):
-        original_x = original_x * plsr_model._x_std + plsr_model._x_mean
+    # If scaling values are provided, reverse the scaling
+    if mean_values is not None and std_values is not None:
+        original_x = original_x * std_values + mean_values
 
-    # Create DataFrame with original column names
-    if hasattr(plsr_model, 'feature_names_in_'):
-        column_names = plsr_model.feature_names_in_
-    else:
-        # If feature names are not available, use generic names
+    # Create DataFrame with original column names or generic names
+    if column_names is None:
         column_names = [f"X{i+1}" for i in range(original_x.shape[1])]
 
     result_df = pd.DataFrame(original_x, columns=column_names)

@@ -12,8 +12,9 @@ import pickle
 
 import numpy as np
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
 
-from excog_trajectory import analysis, columns, data, visualization, trajectory
+from excog_trajectory import analysis, columns, data, trajectory, visualization
 
 
 def parse_args():
@@ -37,8 +38,8 @@ def parse_args():
     plsr_parser.add_argument(
         "--data-path",
         type=str,
-        default="data/processed/imputed/imputed_nhanes_dat1.csv",
-        help="Path to the imputed NHANES dataset",
+        default="data/processed/imputed/",
+        help="Path to the directory containing imputed NHANES datasets",
     )
     plsr_parser.add_argument(
         "--output-dir",
@@ -85,25 +86,25 @@ def parse_args():
     # Parser for the 'trajectory' command
     trajectory_parser = subparsers.add_parser(
         "trajectory",
-        help="Compare cognitive decline trajectories between males and females across DSST categories"
+        help="Compare cognitive decline trajectories between males and females across DSST categories",
     )
     trajectory_parser.add_argument(
         "--data-path",
         type=str,
         default="data/processed/imputed/imputed_nhanes_dat1.csv",
-        help="Path to the imputed data file used in the PLSR analysis"
+        help="Path to the imputed data file used in the PLSR analysis",
     )
     trajectory_parser.add_argument(
         "--model-path",
         type=str,
         default="results/plsr/best_model.pkl",
-        help="Path to the saved PLSR model"
+        help="Path to the saved PLSR model",
     )
     trajectory_parser.add_argument(
         "--output-dir",
         type=str,
         default="results/trajectory",
-        help="Directory to save trajectory comparison results and plots"
+        help="Directory to save trajectory comparison results and plots",
     )
     snf_parser.add_argument(
         "--data-path",
@@ -155,9 +156,7 @@ def parse_args():
     )
 
     # Parser for the 'download' command
-    download_parser = subparsers.add_parser(
-        "download", help="Download NHANES data"
-    )
+    download_parser = subparsers.add_parser("download", help="Download NHANES data")
     download_parser.add_argument(
         "--output-dir",
         type=str,
@@ -270,11 +269,13 @@ def clean_data(args):
     print("Applying QC rules to each dataset separately...")
     for dat in nhanes_data:
         print(f"Applying QC rules to {dat}...")
-        nhanes_data[dat] = data.apply_qc_rules(nhanes_data[dat],
-                                               cognitive_vars,
-                                               covariates=covariates,
-                                               standardize=True,
-                                               log2_transform=True)
+        nhanes_data[dat] = data.apply_qc_rules(
+            nhanes_data[dat],
+            cognitive_vars,
+            covariates=covariates,
+            standardize=True,
+            log2_transform=True,
+        )
         data.categorize_dsst_by_age(nhanes_data[dat])
         # Save the individual cleaned datasets
         output_file = os.path.join(args.output_data, f"cleaned_nhanes_{dat}.csv")
@@ -296,44 +297,69 @@ def clean_data(args):
         exposure_vars = columns.get_exposure_vars(
             data=nhanes_data[dat],
             cognitive_vars=cognitive_vars + cognitive_cats,
-            covariates=covariates
+            covariates=covariates,
         )
 
         visualization.plot_exposure_correlation_matrix(
             data=nhanes_data[dat][exposure_vars],
-            fname=os.path.join(args.output_dir, f"exposure_correlation_matrix_{dat}.png"),
+            fname=os.path.join(
+                args.output_dir, f"exposure_correlation_matrix_{dat}.png"
+            ),
         )
         print(
-            f"Exposure correlation matrix for {dat} saved to {os.path.join(args.output_dir, f'exposure_correlation_matrix_{dat}.png')}")
+            f"Exposure correlation matrix for {dat} saved to {os.path.join(args.output_dir, f'exposure_correlation_matrix_{dat}.png')}"
+        )
 
     # Combine data from both files after applying QC rules
     print("Combining data from multiple files...")
 
     # Ensure CFDDS and CFDRIGHT are treated as the same column in the combined dataset
-    if "CFDDS" in nhanes_data["data_1"].columns and "CFDRIGHT" in nhanes_data["data_2"].columns:
-        print("Renaming CFDRIGHT to CFDDS in data_2 to treat them as the same column...")
-        nhanes_data["data_2"] = nhanes_data["data_2"].rename(columns={"CFDRIGHT": "CFDDS"})
+    if (
+        "CFDDS" in nhanes_data["data_1"].columns
+        and "CFDRIGHT" in nhanes_data["data_2"].columns
+    ):
+        print(
+            "Renaming CFDRIGHT to CFDDS in data_2 to treat them as the same column..."
+        )
+        nhanes_data["data_2"] = nhanes_data["data_2"].rename(
+            columns={"CFDRIGHT": "CFDDS"}
+        )
         # Update cognitive_vars list to reflect the renamed column
         if "CFDRIGHT" in cognitive_vars:
-            cognitive_vars = ["CFDDS" if var == "CFDRIGHT" else var for var in cognitive_vars]
-    elif "CFDRIGHT" in nhanes_data["data_1"].columns and "CFDDS" in nhanes_data["data_2"].columns:
-        print("Renaming CFDDS to CFDRIGHT in data_2 to treat them as the same column...")
-        nhanes_data["data_2"] = nhanes_data["data_2"].rename(columns={"CFDDS": "CFDRIGHT"})
+            cognitive_vars = [
+                "CFDDS" if var == "CFDRIGHT" else var for var in cognitive_vars
+            ]
+    elif (
+        "CFDRIGHT" in nhanes_data["data_1"].columns
+        and "CFDDS" in nhanes_data["data_2"].columns
+    ):
+        print(
+            "Renaming CFDDS to CFDRIGHT in data_2 to treat them as the same column..."
+        )
+        nhanes_data["data_2"] = nhanes_data["data_2"].rename(
+            columns={"CFDDS": "CFDRIGHT"}
+        )
         # Update cognitive_vars list to reflect the renamed column
         if "CFDDS" in cognitive_vars:
-            cognitive_vars = ["CFDRIGHT" if var == "CFDDS" else var for var in cognitive_vars]
+            cognitive_vars = [
+                "CFDRIGHT" if var == "CFDDS" else var for var in cognitive_vars
+            ]
 
     # First, perform an outer merge to get all cols from both dataframes
-    combined_data = pd.merge(nhanes_data["data_1"],
-                             nhanes_data["data_2"],
-                             left_index=True,
-                             right_index=True,
-                             how="outer",
-                             suffixes=('_1', '_2'))
+    combined_data = pd.merge(
+        nhanes_data["data_1"],
+        nhanes_data["data_2"],
+        left_index=True,
+        right_index=True,
+        how="outer",
+        suffixes=("_1", "_2"),
+    )
 
     # Identify cols that have suffixes (indicating they were in both dataframes)
-    suffix_1_cols = [col for col in combined_data.columns if col.endswith('_1')]
-    base_cols = [col[:-2] for col in suffix_1_cols]  # Remove the suffix to get the base column name
+    suffix_1_cols = [col for col in combined_data.columns if col.endswith("_1")]
+    base_cols = [
+        col[:-2] for col in suffix_1_cols
+    ]  # Remove the suffix to get the base column name
 
     # For each pair of suffixed cols, combine them into a single column
     for base_col in base_cols:
@@ -341,7 +367,9 @@ def clean_data(args):
         col_2 = f"{base_col}_2"
 
         # Create a new column that takes values from col_1, but uses col_2 where col_1 is NaN
-        combined_data[base_col] = combined_data[col_1].combine_first(combined_data[col_2])
+        combined_data[base_col] = combined_data[col_1].combine_first(
+            combined_data[col_2]
+        )
 
         # Drop the original suffixed cols
         combined_data = combined_data.drop([col_1, col_2], axis=1)
@@ -352,19 +380,23 @@ def clean_data(args):
     print("Filtering cols to keep those with at least one observation in each Cycle...")
 
     # Check if we have the original 'Cycle' column or dummy variables
-    cycle_dummy_cols = [col for col in combined_data.columns if col.startswith('Cycle_')]
+    cycle_dummy_cols = [
+        col for col in combined_data.columns if col.startswith("Cycle_")
+    ]
 
-    if 'Cycle' in combined_data.columns:
+    if "Cycle" in combined_data.columns:
         # Original Cycle column exists, use it for grouping
         print("Using original Cycle column for filtering...")
-        cycles = combined_data['Cycle'].unique()
+        cycles = combined_data["Cycle"].unique()
         columns_to_keep = []
 
         for column in combined_data.columns:
             has_observation_in_all_cycles = True
             for cycle in cycles:
-                cycle_data = combined_data[combined_data['Cycle'] == cycle]
-                if cycle_data[column].isna().all():  # Check if ALL values are missing in this cycle
+                cycle_data = combined_data[combined_data["Cycle"] == cycle]
+                if (
+                    cycle_data[column].isna().all()
+                ):  # Check if ALL values are missing in this cycle
                     has_observation_in_all_cycles = False
                     break
 
@@ -398,22 +430,30 @@ def clean_data(args):
     print(f"Combined data shape after filtering: {combined_data.shape}")
 
     # Save the cleaned data
-    combined_data.to_csv(os.path.join(args.output_data, "cleaned_nhanes.csv"), index=True)
-    print(f"Cleaned data saved to {os.path.join(args.output_data, 'cleaned_nhanes.csv')}")
+    combined_data.to_csv(
+        os.path.join(args.output_data, "cleaned_nhanes.csv"), index=True
+    )
+    print(
+        f"Cleaned data saved to {os.path.join(args.output_data, 'cleaned_nhanes.csv')}"
+    )
 
     # Calculate percentage of missing data for each column in the combined dataset
     print("Calculating percentage of missing data for combined dataset...")
     missing_data_df = data.get_percentage_missing(combined_data)
 
     # Save the missing data percentages for the combined dataset
-    missing_data_df.to_csv(os.path.join(args.output_data, "percentage_missing.csv"), index=False)
-    print(f"Percentage of missing data saved to {os.path.join(args.output_data, 'percentage_missing.csv')}")
+    missing_data_df.to_csv(
+        os.path.join(args.output_data, "percentage_missing.csv"), index=False
+    )
+    print(
+        f"Percentage of missing data saved to {os.path.join(args.output_data, 'percentage_missing.csv')}"
+    )
 
     print("Creating visualizations for combined dataset...")
     exposure_vars = columns.get_exposure_vars(
         data=combined_data,
         cognitive_vars=cognitive_vars + cognitive_cats,
-        covariates=covariates
+        covariates=covariates,
     )
     # Plot exposure distributions
     fig1 = visualization.plot_distributions(
@@ -423,7 +463,9 @@ def clean_data(args):
         save_path=args.output_dir,
         figsize=(10, 20),
     )
-    print(f"Exposure distributions plot saved to {os.path.join(args.output_dir, 'distributions.png')}")
+    print(
+        f"Exposure distributions plot saved to {os.path.join(args.output_dir, 'distributions.png')}"
+    )
 
     # Create correlation matrix of exposure variables for the combined dataset
     print("Creating correlation matrix of exposure variables for combined dataset...")
@@ -432,7 +474,9 @@ def clean_data(args):
         data=combined_data[exposure_vars],
         fname=os.path.join(args.output_dir, "exposure_correlation_matrix.png"),
     )
-    print(f"Exposure correlation matrix saved to {os.path.join(args.output_dir, 'exposure_correlation_matrix.png')}")
+    print(
+        f"Exposure correlation matrix saved to {os.path.join(args.output_dir, 'exposure_correlation_matrix.png')}"
+    )
 
     print("Analysis complete!")
 
@@ -441,9 +485,7 @@ def run_download(args):
     """Download NHANES data to the output directory."""
     # Download the data
     csv_paths = data.download_nhanes_data(
-        output_dir=args.output_dir,
-        filename=args.filename,
-        direct_url=args.direct_url
+        output_dir=args.output_dir, filename=args.filename, direct_url=args.direct_url
     )
 
     # Handle both single path and list of paths
@@ -501,139 +543,238 @@ def run_imputation(args):
         print(f"Creating correlation matrix for dataset {dataset_num}...")
         visualization.plot_exposure_correlation_matrix(
             data=imputed_data[exposure_vars],
-            fname=os.path.join(correlation_output_dir, f"exposure_correlation_matrix_dataset{dataset_num}.png"),
+            fname=os.path.join(
+                correlation_output_dir,
+                f"exposure_correlation_matrix_dataset{dataset_num}.png",
+            ),
             dpi=300,
         )
 
 
 def run_plsr_analysis(args):
-    """Run the PLSR analysis pipeline."""
-    # Create output directory if it doesn't exist
+    """Run the PLSR analysis pipeline.
+
+    This function processes multiple imputed datasets from the specified directory,
+    runs PLSR on each dataset, and saves the results in separate subdirectories.
+    For each imputed dataset, it:
+    1. Creates a subdirectory under the output directory
+    2. Runs PLSR with double cross-validation
+    3. Saves the PLSR results table as a CSV
+    4. Creates and saves the best model
+    5. Calculates and saves VIP-X scores
+    6. Creates and saves visualizations of VIP-X scores and PLSR scores
+
+    After processing all datasets, it determines the most common number of LVs across all datasets,
+    creates a single best model with that number, and saves it to the main output directory.
+    """
+    # Create main output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
 
-    print(f"Loading imputed NHANES data from {args.data_path}...")
-    data_df = pd.read_csv(args.data_path, index_col=0)
-
-    # Define variables for analysis using the cols module
-    cognitive_vars = columns.COGNITIVE_VARS  # Using a specific cognitive variable for PLSR
-    covariates = columns.COVARIATES  # Demographics and survey cycle
-    cognitive_cats = columns.COGNITIVE_CAT  # Cognitive categories
-
-    # Validate cols exist in the dataset
-    valid_cognitive_vars = columns.validate_columns(data_df,
-                                                    cognitive_vars,
-                                                    raise_error=False)
-    valid_covariates = columns.validate_columns(data_df,
-                                                covariates,
-                                                raise_error=False)
-    dummy_vars = columns.get_dummy_vars(data_df)
-
-    # Get exposure variables using the cols module
-    exposure_vars = columns.get_exposure_vars(
-        data=data_df,
-        cognitive_vars=valid_cognitive_vars + cognitive_cats,
-        covariates=valid_covariates
-    )
-    x = data_df[exposure_vars]
-    y = data_df[valid_cognitive_vars]
-
-    print(f"Running PLSR with {len(exposure_vars)} exposure variables, and "
-          f"{len(valid_cognitive_vars)} cognitive variables...")
-
-    if args.max_components > x.shape[1]:
-        print(f"Warning: Number of components ({args.max_components}) is greater than the number of variables ({x.shape[1]}). "
-              f"Setting max_components to {x.shape[1]}.")
-        args.max_components = x.shape[1]
-
-    if args.n_repetitions > 1:
+    # Check if data_path is a directory
+    if not os.path.isdir(args.data_path):
         print(
-            f"Running PLSR with double cross-validation ({args.outer_folds} outer folds, "
-            f"{args.inner_folds} inner folds) repeated {args.n_repetitions} times...")
-    else:
+            f"Error: {args.data_path} is not a directory. Please provide a directory containing imputed datasets."
+        )
+        return
+
+    # Find all imputed dataset files in the directory
+    imputed_files = [
+        f
+        for f in os.listdir(args.data_path)
+        if f.startswith("imputed_nhanes_dat") and f.endswith(".csv")
+    ]
+
+    if not imputed_files:
+        print(f"Error: No imputed dataset files found in {args.data_path}")
+        return
+
+    print(f"Found {len(imputed_files)} imputed dataset files in {args.data_path}")
+
+    # List to store PLSR results tables from all imputed datasets
+    all_plsr_tables = []
+
+    # List xs and ys
+    exes = []
+    eyes = []
+
+    # Process each imputed dataset
+    for imputed_file in sorted(imputed_files):
+        dataset_num = imputed_file.split("dat")[1].split(".")[0]
+        print(f"\nProcessing imputed dataset {dataset_num}...")
+
+        # Create a subdirectory for this imputed dataset
+        dataset_output_dir = os.path.join(args.output_dir, f"dataset{dataset_num}")
+        os.makedirs(dataset_output_dir, exist_ok=True)
+
+        # Load the imputed dataset
+        file_path = os.path.join(args.data_path, imputed_file)
+        print(f"Loading imputed NHANES data from {file_path}...")
+        data_df = pd.read_csv(file_path, index_col=0)
+
+        # Define variables for analysis using the cols module
+        cognitive_vars = (
+            columns.COGNITIVE_VARS
+        )  # Using a specific cognitive variable for PLSR
+        covariates = columns.COVARIATES  # Demographics and survey cycle
+        cognitive_cats = columns.COGNITIVE_CAT  # Cognitive categories
+
+        # Validate cols exist in the dataset
+        valid_cognitive_vars = columns.validate_columns(
+            data_df, cognitive_vars, raise_error=False
+        )
+        valid_covariates = columns.validate_columns(
+            data_df, covariates, raise_error=False
+        )
+        dummy_vars = columns.get_dummy_vars(data_df)
+
+        # Get exposure variables using the cols module
+        exposure_vars = columns.get_exposure_vars(
+            data=data_df,
+            cognitive_vars=valid_cognitive_vars + cognitive_cats,
+            covariates=valid_covariates,
+        )
+        x = data_df[exposure_vars]
+
+        # Get the cognitive variables
+        y_original = data_df[valid_cognitive_vars]
+        scaler = StandardScaler().fit(y_original)
+        y = pd.DataFrame(scaler.transform(y_original))
+
+        # Append x and y
+        exes.append(x)
+        eyes.append(y)
+
         print(
-            f"Running PLSR with double cross-validation ({args.outer_folds} outer folds, "
-            f"{args.inner_folds} inner folds)...")
+            f"Running PLSR with {len(exposure_vars)} exposure variables, and "
+            f"{len(valid_cognitive_vars)} cognitive variables..."
+        )
 
-    plsr_results = analysis.pls_double_cv(
-        x=x,
-        y=y,
-        n_repeats=args.n_repetitions,
-        max_components=args.max_components,
-        cv2_splits=args.outer_folds,
-        cv1_splits=args.inner_folds
-    )
-    # Save table
-    plsr_results['table'].to_csv(
-        os.path.join(args.output_dir, "plsr_results_table.csv"),
-        index=False)
+        if args.max_components > x.shape[1]:
+            print(
+                f"Warning: Number of components ({args.max_components}) is greater than the number of variables ({x.shape[1]}). "
+                f"Setting max_components to {x.shape[1]}."
+            )
+            args.max_components = x.shape[1]
 
-    # Print information about the final model
-    mode = int(plsr_results['table']['LV'].mode()[0])
-    print(f"\nThe most repeated number of LV: {str(mode)}")
-    from sklearn.cross_decomposition import PLSRegression
-    best_model = PLSRegression(
-        n_components=mode,
-        scale=True,
-        max_iter=1000).fit(
-        X=x,
-        y=y
-    )
-    print(f"A final model has been trained on the entire dataset using {str(mode)} components.")
+        if args.n_repetitions > 1:
+            print(
+                f"Running PLSR with double cross-validation ({args.outer_folds} outer folds, "
+                f"{args.inner_folds} inner folds) repeated {args.n_repetitions} times..."
+            )
+        else:
+            print(
+                f"Running PLSR with double cross-validation ({args.outer_folds} outer folds, "
+                f"{args.inner_folds} inner folds)..."
+            )
 
-    # Save the results
-    with open(os.path.join(args.output_dir, "best_model.pkl"), "wb") as f:
-        pickle.dump(best_model, f)
+        plsr_results = analysis.pls_double_cv(
+            x=x,
+            y=y,
+            n_repeats=args.n_repetitions,
+            max_components=args.max_components,
+            cv2_splits=args.outer_folds,
+            cv1_splits=args.inner_folds,
+        )
 
-    # Ensure cognitive categories (DSST_High, DSST_Average, DSST_Low) are present in the data
-    # Check if cognitive categories exist in the data
-    missing_categories = [cat for cat in cognitive_cats if cat not in data_df.columns]
+        # Save table for this dataset
+        plsr_results["table"].to_csv(
+            os.path.join(dataset_output_dir, "plsr_results_table.csv"), index=False
+        )
 
-    if missing_categories:
-        print(f"Categorizing DSST scores by age to create cognitive categories: {', '.join(cognitive_cats)}")
-        data_df = data.categorize_dsst_by_age(data_df)
+        # Append the PLSR results table to our list of all tables
+        all_plsr_tables.append(plsr_results["table"])
 
-    # Calculate VIP-X scores
-    print("Calculating VIP-X scores...")
-    vip_x_scores = analysis.calculate_vip_x_scores(best_model, x)
+        # Print information about the final model for this dataset
+        mode = int(plsr_results["table"]["LV"].mode()[0])
+        print(
+            f"\nThe most repeated number of LV for dataset {dataset_num}: {str(mode)}"
+        )
+        from sklearn.cross_decomposition import PLSRegression
 
-    # Save VIP-X scores to CSV
-    vip_x_file = os.path.join(args.output_dir, "vip_x_scores.csv")
-    vip_x_scores.to_csv(vip_x_file)
-    print(f"VIP-X scores saved to {vip_x_file}")
+        best_model = PLSRegression(
+            n_components=mode,
+            scale=False,  # Changed from True to False as we're handling scaling separately
+            max_iter=1000,
+        ).fit(X=x, y=y)
+        print(
+            f"A final model has been trained on dataset {dataset_num} using {str(mode)} components."
+        )
 
-    # Create visualization of VIP-X scores
-    vip_x_plots = visualization.plot_vip_x_scores(
-        vip_x_scores=vip_x_scores,
-        output_dir=args.output_dir
-    )
+        # Save the best model for this dataset
+        with open(os.path.join(dataset_output_dir, "best_model.pkl"), "wb") as f:
+            pickle.dump(best_model, f)
 
-    # Print information about the saved VIP-X plots
-    if vip_x_plots["plots"]:
-        print("VIP-X score plots saved to:")
-        for plot_path in vip_x_plots["plots"]:
-            print(f"  - {plot_path}")
+        # Ensure cognitive categories (DSST_High, DSST_Average, DSST_Low) are present in the data
+        # Check if cognitive categories exist in the data
+        missing_categories = [
+            cat for cat in cognitive_cats if cat not in data_df.columns
+        ]
+
+        if missing_categories:
+            print(
+                f"Categorizing DSST scores by age to create cognitive categories: {', '.join(cognitive_cats)}"
+            )
+            data_df = data.categorize_dsst_by_age(data_df)
+
+        # Calculate VIP-X scores
+        print(f"Calculating VIP-X scores for dataset {dataset_num}...")
+        vip_x_scores = analysis.calculate_vip_x_scores(best_model, x)
+
+        # Save VIP-X scores to CSV
+        vip_x_file = os.path.join(dataset_output_dir, "vip_x_scores.csv")
+        vip_x_scores.to_csv(vip_x_file)
+        print(f"VIP-X scores saved to {vip_x_file}")
+
+        # Create visualization of VIP-X scores
+        visualization.plot_vip_x_scores(
+            vip_x_scores=vip_x_scores, output_dir=dataset_output_dir
+        )
+
+        # Create scatter plots of the first two columns of x_scores
+        visualization.plot_plsr_scores(
+            best_model=best_model,
+            data_df=data_df,
+            cognitive_vars=exposure_vars + valid_cognitive_vars,
+            output_dir=dataset_output_dir,
+        )
+
+        print(
+            f"PLSR results for dataset {dataset_num} saved to {os.path.join(dataset_output_dir, 'best_model.pkl')}"
+        )
+
+    # Concatenate all PLSR results tables
+    if all_plsr_tables:
+        # List to store best models from each imputed dataset
+        all_best_models = []
+
+        all_tables = pd.concat(all_plsr_tables, ignore_index=True)
+
+        # Determine the most common number of LVs across all datasets
+        best_lv = int(all_tables["LV"].mode()[0])
+        print(f"\nThe most common number of LVs across all datasets: {best_lv}")
+
+        # Create a single best model with the most common number of LVs using the last processed dataset
+        from sklearn.cross_decomposition import PLSRegression
+
+        for x, y in zip(exes, eyes):
+            # Create a PLSRegression model with the best number of components
+            print(f"Creating best model with {best_lv} components...")
+            best_model = PLSRegression(
+                n_components=best_lv, scale=False, max_iter=1000
+            ).fit(X=x, y=y)
+            all_best_models.append(best_model)
+
+        # Save the single best model to the main output directory
+        with open(os.path.join(args.output_dir, "best_model.pkl"), "wb") as f:
+            pickle.dump(all_best_models, f)
+
+        print(
+            f"\nBest model with {best_lv} components saved to {os.path.join(args.output_dir, 'best_model.pkl')}"
+        )
     else:
-        print("No VIP-X score plots were created.")
+        print("\nNo PLSR results tables were generated. No best model was created.")
 
-    # Create scatter plots of the first two columns of x_scores
-    plsr_plots = visualization.plot_plsr_scores(
-        best_model=best_model,
-        data_df=data_df,
-        cognitive_vars=exposure_vars + valid_cognitive_vars,
-        output_dir=args.output_dir
-    )
-
-    print(f"PLSR results saved to {os.path.join(args.output_dir, 'best_model.pkl')}")
-
-    # Print information about the saved plots
-    if plsr_plots["plots"]:
-        print("PLSR scores scatter plots saved to:")
-        for plot_path in plsr_plots["plots"]:
-            print(f"  - {plot_path}")
-    else:
-        print("No PLSR scores scatter plots were created.")
-
-    print("PLSR analysis complete!")
+    print("PLSR analysis complete for all imputed datasets!")
 
 
 def run_snf_analysis(args):
@@ -647,11 +788,23 @@ def run_snf_analysis(args):
     # Define variables for analysis
     cognitive_vars = ["CFDRIGHT"]  # Cognitive function right responses
     # Note: SNF uses a different set of covariates than other functions
-    covariates = ["RIDAGEYR", "female", "male", "black", "mexican", "other_hispanic", "other_eth", "SES_LEVEL",
-                  "education", "SDDSRVYR"]  # Demographics and survey cycle
+    covariates = [
+        "RIDAGEYR",
+        "female",
+        "male",
+        "black",
+        "mexican",
+        "other_hispanic",
+        "other_eth",
+        "SES_LEVEL",
+        "education",
+        "SDDSRVYR",
+    ]  # Demographics and survey cycle
 
     # Validate cols exist in the dataset
-    valid_cognitive_vars = columns.validate_columns(data_df, cognitive_vars, raise_error=False)
+    valid_cognitive_vars = columns.validate_columns(
+        data_df, cognitive_vars, raise_error=False
+    )
     valid_covariates = columns.validate_columns(data_df, covariates, raise_error=False)
 
     # Create exposure categories based on column name patterns using the cols module
@@ -663,10 +816,12 @@ def run_snf_analysis(args):
         print(f"  {category}: {len(vars_list)} variables")
 
     print(
-        f"Running SNF with {len(exposure_categories)} exposure categories, {len(cognitive_vars)} cognitive variables, and {len(covariates)} covariates...")
+        f"Running SNF with {len(exposure_categories)} exposure categories, {len(cognitive_vars)} cognitive variables, and {len(covariates)} covariates..."
+    )
 
     # Run SNF
     from excog_trajectory import analysis
+
     snf_results = analysis.run_snf(
         data=data_df,
         exposure_categories=exposure_categories,
@@ -680,6 +835,7 @@ def run_snf_analysis(args):
 
     # Save the results
     import pickle
+
     with open(os.path.join(args.output_dir, "snf_results.pkl"), "wb") as f:
         pickle.dump(snf_results, f)
 
@@ -687,14 +843,14 @@ def run_snf_analysis(args):
 
     # Create visualizations
     import matplotlib.pyplot as plt
-    from sklearn.manifold import TSNE
     from sklearn.cluster import KMeans
+    from sklearn.manifold import TSNE
 
     # Plot the fused similarity matrix
     plt.figure(figsize=(10, 8))
-    plt.imshow(snf_results["fused_matrix"], cmap='viridis')
-    plt.colorbar(label='Similarity')
-    plt.title('SNF Fused Similarity Matrix')
+    plt.imshow(snf_results["fused_matrix"], cmap="viridis")
+    plt.colorbar(label="Similarity")
+    plt.title("SNF Fused Similarity Matrix")
     plt.tight_layout()
     plt.savefig(os.path.join(args.output_dir, "snf_fused_matrix.png"), dpi=300)
 
@@ -710,9 +866,15 @@ def run_snf_analysis(args):
 
     # Plot the t-SNE result with cluster labels
     plt.figure(figsize=(10, 8))
-    scatter = plt.scatter(tsne_result[:, 0], tsne_result[:, 1], c=cluster_labels, cmap='viridis', alpha=0.8)
-    plt.colorbar(scatter, label='Cluster')
-    plt.title('t-SNE Visualization of SNF Fused Similarity Matrix')
+    scatter = plt.scatter(
+        tsne_result[:, 0],
+        tsne_result[:, 1],
+        c=cluster_labels,
+        cmap="viridis",
+        alpha=0.8,
+    )
+    plt.colorbar(scatter, label="Cluster")
+    plt.title("t-SNE Visualization of SNF Fused Similarity Matrix")
     plt.tight_layout()
     plt.savefig(os.path.join(args.output_dir, "snf_tsne.png"), dpi=300)
 
@@ -733,9 +895,15 @@ def run_trajectory_comparison(args):
     # Load data and set it up
     with open(args.model_path, "rb") as f:
         model = pickle.load(f)
-    df = pd.read_csv(args.data_path)
-    x_scores = pd.DataFrame(model.x_scores_)
+    all_xscores = []
+    all_loadings = []
+    for mod in model:
+        all_xscores.append(mod.x_scores_)
+        all_loadings.append(mod.x_loadings_)
+    x_scores = pd.DataFrame(np.mean(np.stack(all_xscores, axis=0), axis=0))
+    x_loadings = pd.DataFrame(np.mean(np.stack(all_loadings, axis=0), axis=0))
     x_scores.columns = [f"LV{i+1}" for i in range(x_scores.shape[1])]
+    df = pd.read_csv(args.data_path)
     df_full = pd.concat([df, x_scores], axis=1)
     df_full.set_index("sample", inplace=True)
 
@@ -754,58 +922,53 @@ def run_trajectory_comparison(args):
         cognitive_cat=cognitive_cat,
         dummy_vars=dummy_vars,
         valid_covariates=valid_covariates,
-        add_interactions=True
+        add_interactions=True,
     )
     reduced_model = trajectory.create_model_matrix(
         model_matrix=initial_model_matrix,
         cognitive_cat=cognitive_cat,
         dummy_vars=dummy_vars,
         valid_covariates=valid_covariates,
-        add_interactions=False
+        add_interactions=False,
     )
 
     y = x_scores
     betas = trajectory.estimate_betas(model_matrix, y)
     ls_vectors = trajectory._get_ls_vectors(model_matrix)
-    contrast = [[0,1,2], [3,4,5]]
+    contrast = [[0, 1, 2], [3, 4, 5]]
     obs_vect = pd.DataFrame(np.matmul(ls_vectors, betas))
     # Set column names for obs_vect to match the LV columns in x_scores
     obs_vect.columns = [f"LV{i+1}" for i in range(obs_vect.shape[1])]
     obs_vect_transformed = obs_vect.copy()
-    obs_vect_transformed.iloc[[0,1,2],:] -= obs_vect_transformed.iloc[1,:]
-    obs_vect_transformed.iloc[[3,4,5],:] -= obs_vect_transformed.iloc[4,:]
+    obs_vect_transformed.iloc[[0, 1, 2], :] -= obs_vect_transformed.iloc[1, :]
+    obs_vect_transformed.iloc[[3, 4, 5], :] -= obs_vect_transformed.iloc[4, :]
 
-    deltas, angles, shapes = trajectory.estimate_difference(y,
-                                                            model_matrix,
-                                                            ls_vectors,
-                                                            contrast)
+    deltas, angles, shapes = trajectory.estimate_difference(
+        y, model_matrix, ls_vectors, contrast
+    )
 
-    r_deltas, r_angles, r_shapes = trajectory.RRPP(y,
-                                                   model_matrix,
-                                                   reduced_model,
-                                                   ls_vectors,
-                                                   contrast,
-                                                   9999)
+    r_deltas, r_angles, r_shapes = trajectory.RRPP(
+        y, model_matrix, reduced_model, ls_vectors, contrast, 9999
+    )
 
     total_rep = 10000
     pvals = [
-           (sum(r_angles > angles) / total_rep)[0, 1],
-           (sum(r_deltas > deltas) / total_rep)[0, 1],
-           (sum(r_shapes > shapes) / total_rep)[0, 1],
-       ]
+        (sum(r_angles > angles) / total_rep)[0, 1],
+        (sum(r_deltas > deltas) / total_rep)[0, 1],
+        (sum(r_shapes > shapes) / total_rep)[0, 1],
+    ]
 
     # Export p-values to CSV
-    pval_df = pd.DataFrame({
-        'comparison_type': ['orientation', 'magnitude', 'shape'],
-        'pvalue': pvals
-    })
+    pval_df = pd.DataFrame(
+        {"comparison_type": ["orientation", "magnitude", "shape"], "pvalue": pvals}
+    )
     pval_path = os.path.join(args.output_dir, "pvalues.csv")
     pval_df.to_csv(pval_path, index=False)
     print(f"P-values exported to {pval_path}")
 
     # Create cognitive trajectory plots using the new function in visualization.py
     plot_names = ["cognitive_trajectory", "cognitive_trajectory_transformed"]
-    for i, vect in enumerate([obs_vect, obs_vect_transformed]):
+    for i, vect in enumerate([obs_vect, obs_vect_transformed * 2]):
         visualization.plot_cognitive_trajectory(
             x_scores=x_scores,
             obs_vect=vect,
@@ -816,10 +979,15 @@ def run_trajectory_comparison(args):
     print(f"Trajectory plots saved to {args.output_dir}")
 
     # Transform vectors back to original X matrix values and export to CSV
-    original_x = trajectory.transform_vectors_to_original(obs_vect, model)
+    # TODO: how to transform back using five models?
+    original_x = trajectory.transform_vectors_to_original(obs_vect,
+                                                          x_loadings=x_loadings,
+                                                          feature_names=model[0].feature_names_in_)
     original_x_path = os.path.join(args.output_dir, "original_x_values.csv")
     original_x.to_csv(original_x_path, index=False)
-    original_x = trajectory.transform_vectors_to_original(obs_vect_transformed, model)
+    original_x = trajectory.transform_vectors_to_original(obs_vect_transformed,
+                                                          x_loadings=x_loadings,
+                                                          feature_names=model[0].feature_names_in_)
     original_x_path = os.path.join(args.output_dir, "original_x_values_transformed.csv")
     original_x.to_csv(original_x_path, index=False)
     print(f"Original X matrix values saved to {original_x_path}")

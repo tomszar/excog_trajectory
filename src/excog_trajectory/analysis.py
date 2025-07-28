@@ -161,7 +161,7 @@ def _plsda_r2(
         Return the R2 score, and optionally the regression model.
     """
     pls = PLSRegression(
-        n_components=n_components, scale=True, max_iter=1000).fit(
+        n_components=n_components, scale=False, max_iter=1000).fit(
         X=x_train, y=y_train
     )
     score = pls.score(x_test, y_test)
