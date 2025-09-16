@@ -8,6 +8,8 @@ The goal of this project is to investigate how various environmental exposures (
 
 ## Features
 
+See also docs/qc_rules.md for the detailed description of quality control (QC) rules.
+
 - Load and preprocess NHANES data related to cognitive assessments and environmental exposures
 - Apply quality control rules to ensure data reliability:
   - Remove variables with less than 200 non-NaN values

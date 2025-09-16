@@ -268,6 +268,8 @@ def RRPP(
     LS_means: Union[pd.DataFrame, np.ndarray],
     contrast: List[List[int]],
     permutations: int = 999,
+    show_progress: bool = False,
+    stop_early: Optional[int] = None,
 ) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray]]:
     """
     Residual Randomization in a Permutation Procedure to evaluate linear models.
@@ -303,8 +305,19 @@ def RRPP(
     y_res = Y - y_hat
     ids = y_res.index
     deltas, angles, shapes = [], [], []
-    for _ in range(permutations):
-        ids_permuted = np.random.permutation(ids)
+
+    rng = np.random.default_rng()
+
+    iterator = range(permutations)
+    if show_progress:
+        try:
+            from tqdm import tqdm  # type: ignore
+            iterator = tqdm(iterator, total=permutations)
+        except Exception:
+            pass
+
+    for i in iterator:
+        ids_permuted = rng.permutation(ids)
         y_res_permuted = y_res.loc[ids_permuted, :]
         y_res_permuted.index = y_res.index
         y_random = y_hat + y_res_permuted
@@ -312,6 +325,8 @@ def RRPP(
         deltas.append(d)
         angles.append(a)
         shapes.append(s)
+        if stop_early is not None and i + 1 >= stop_early:
+            break
     return deltas, angles, shapes
 
 

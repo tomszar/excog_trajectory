@@ -86,17 +86,23 @@ def pls_double_cv(
             x_val = x_rest.iloc[validation, :]
             y_val = y_rest.iloc[validation, :]
             ns = list(range(1, max_components))
-            with multiprocessing.Pool(processes=None) as pool:
-                r2_scores = pool.starmap(
-                    _plsda_r2,
-                    zip(
-                        ns,
-                        repeat(x_train),
-                        repeat(y_train),
-                        repeat(x_val),
-                        repeat(y_val),
-                    ),
-                )
+            try:
+                with multiprocessing.Pool(processes=None) as pool:
+                    r2_scores = pool.starmap(
+                        _plsda_r2,
+                        zip(
+                            ns,
+                            repeat(x_train),
+                            repeat(y_train),
+                            repeat(x_val),
+                            repeat(y_val),
+                        ),
+                    )
+            except Exception:
+                # Fallback to serial computation (safer on some platforms/CI)
+                r2_scores = [
+                    _plsda_r2(nlv, x_train, y_train, x_val, y_val) for nlv in ns
+                ]
             nlv = r2_scores.index(max(r2_scores)) + 1
             cv1_table.iloc[row_cv1, 0] = nlv
             cv1_table.iloc[row_cv1, 1] = max(r2_scores)

@@ -13,8 +13,13 @@ import pickle
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
+from excog_trajectory.visualization_theme import apply_theme
+from excog_trajectory.preprocess import standardize_targets
 
-from excog_trajectory import analysis, columns, data, trajectory, visualization
+from excog_trajectory import analysis, columns, data, trajectory, visualization, constants, schema
+from excog_trajectory.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 def parse_args():
@@ -23,6 +28,13 @@ def parse_args():
         description="Analyze exposomic trajectories of cognitive decline in NHANES"
     )
 
+    # Helper types with validation
+    def positive_int(val: str) -> int:
+        iv = int(val)
+        if iv <= 0:
+            raise argparse.ArgumentTypeError("Value must be a positive integer")
+        return iv
+
     # Create subparsers for different commands
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
 
@@ -30,150 +42,170 @@ def parse_args():
     clean_parser = subparsers.add_parser(
         "clean", help="Clean and prepare NHANES data for analysis"
     )
+    clean_io = clean_parser.add_argument_group("I/O")
+    clean_io.add_argument(
+        "--output-dir",
+        type=str,
+        default=constants.DEFAULT_CLEAN_OUTPUT_DIR,
+        help="Directory to save results and figures",
+    )
+    clean_io.add_argument(
+        "--output-data",
+        type=str,
+        default=constants.DEFAULT_CLEAN_OUTPUT_DATA,
+        help="Directory to save processed data",
+    )
 
     # Parser for the 'plsr' command
     plsr_parser = subparsers.add_parser(
         "plsr", help="Run Partial Least Squares Regression on NHANES data"
     )
-    plsr_parser.add_argument(
+    plsr_io = plsr_parser.add_argument_group("I/O")
+    plsr_cv = plsr_parser.add_argument_group("Cross-Validation")
+    plsr_opt = plsr_parser.add_argument_group("Options")
+    plsr_io.add_argument(
         "--data-path",
         type=str,
-        default="data/processed/imputed/",
+        default=constants.DEFAULT_PLSR_DATA_PATH,
         help="Path to the directory containing imputed NHANES datasets",
     )
-    plsr_parser.add_argument(
+    plsr_io.add_argument(
         "--output-dir",
         type=str,
-        default="results/plsr",
+        default=constants.DEFAULT_PLSR_OUTPUT_DIR,
         help="Directory to save PLSR results",
     )
-    plsr_parser.add_argument(
+    plsr_opt.add_argument(
         "--scale",
         type=bool,
         default=True,
         help="Whether to standardize the data before running PLSR",
     )
-    plsr_parser.add_argument(
+    plsr_cv.add_argument(
         "--outer-folds",
-        type=int,
+        type=positive_int,
         default=8,
         help="Number of folds for the outer cross-validation loop",
     )
-    plsr_parser.add_argument(
+    plsr_cv.add_argument(
         "--inner-folds",
-        type=int,
+        type=positive_int,
         default=7,
         help="Number of folds for the inner cross-validation loop",
     )
-    plsr_parser.add_argument(
+    plsr_cv.add_argument(
         "--max-components",
-        type=int,
+        type=positive_int,
         default=5,
         help="Maximum number of components to try in cross-validation",
     )
-    plsr_parser.add_argument(
+    plsr_cv.add_argument(
         "--n-repetitions",
-        type=int,
+        type=positive_int,
         default=10,
         help="Number of times to repeat the cross-validation process",
+    )
+    plsr_cv.add_argument(
+        "--random-state",
+        type=positive_int,
+        default=1203,
+        help="Random state for cross-validation repeatability",
+    )
+    plsr_opt.add_argument(
+        "--use-cache",
+        type=bool,
+        default=False,
+        help="Reuse existing PLSR results table in each dataset output directory if present",
     )
 
     # Parser for the 'snf' command
     snf_parser = subparsers.add_parser(
         "snf", help="Run Similarity Network Fusion on NHANES data"
     )
+    snf_io = snf_parser.add_argument_group("I/O")
+    snf_opt = snf_parser.add_argument_group("Options")
 
     # Parser for the 'trajectory' command
     trajectory_parser = subparsers.add_parser(
         "trajectory",
         help="Compare cognitive decline trajectories between males and females across DSST categories",
     )
-    trajectory_parser.add_argument(
+    traj_io = trajectory_parser.add_argument_group("I/O")
+    traj_io.add_argument(
         "--data-path",
         type=str,
-        default="data/processed/imputed/imputed_nhanes_dat1.csv",
+        default=constants.DEFAULT_TRAJECTORY_DATA_PATH,
         help="Path to the imputed data file used in the PLSR analysis",
     )
-    trajectory_parser.add_argument(
+    traj_io.add_argument(
         "--model-path",
         type=str,
-        default="results/plsr/best_model.pkl",
+        default=constants.DEFAULT_TRAJECTORY_MODEL_PATH,
         help="Path to the saved PLSR model",
     )
-    trajectory_parser.add_argument(
+    traj_io.add_argument(
         "--output-dir",
         type=str,
-        default="results/trajectory",
+        default=constants.DEFAULT_TRAJECTORY_OUTPUT_DIR,
         help="Directory to save trajectory comparison results and plots",
     )
-    snf_parser.add_argument(
+    snf_io.add_argument(
         "--data-path",
         type=str,
-        default="data/processed/imputed_nhanes_dat1.csv",
+        default=constants.DEFAULT_SNF_DATA_PATH,
         help="Path to the imputed NHANES dataset",
     )
-    snf_parser.add_argument(
+    snf_io.add_argument(
         "--output-dir",
         type=str,
-        default="results/snf",
+        default=constants.DEFAULT_SNF_OUTPUT_DIR,
         help="Directory to save SNF results",
     )
-    snf_parser.add_argument(
+    snf_opt.add_argument(
         "--k",
-        type=int,
+        type=positive_int,
         default=20,
         help="Number of nearest neighbors to consider",
     )
-    snf_parser.add_argument(
+    snf_opt.add_argument(
         "--t",
-        type=int,
+        type=positive_int,
         default=20,
         help="Number of iterations for the fusion process",
     )
-    snf_parser.add_argument(
+    snf_opt.add_argument(
         "--alpha",
         type=float,
         default=0.5,
         help="Parameter controlling the importance of local vs. global structure",
     )
-    snf_parser.add_argument(
+    snf_opt.add_argument(
         "--scale",
         type=bool,
         default=True,
         help="Whether to standardize the data before running SNF",
     )
-    clean_parser.add_argument(
-        "--output-dir",
-        type=str,
-        default="results",
-        help="Directory to save results and figures",
-    )
-    clean_parser.add_argument(
-        "--output-data",
-        type=str,
-        default="data/processed",
-        help="Directory to save processed data",
-    )
 
     # Parser for the 'download' command
     download_parser = subparsers.add_parser("download", help="Download NHANES data")
-    download_parser.add_argument(
+    dl_io = download_parser.add_argument_group("I/O")
+    dl_io.add_argument(
         "--output-dir",
         type=str,
-        default="data/raw",
+        default=constants.DEFAULT_DOWNLOAD_OUTPUT_DIR,
         help="Directory to save downloaded data",
     )
-    download_parser.add_argument(
+    dl_io.add_argument(
         "--direct-url",
         type=str,
         nargs="+",
-        default=["https://osf.io/download/9aupq/", "https://osf.io/download/9vewm/"],
+        default=constants.DEFAULT_DIRECT_URLS,
         help="Direct URL(s) to download the data from. Can provide multiple URLs.",
     )
-    download_parser.add_argument(
+    dl_io.add_argument(
         "--filename",
         type=str,
-        default="nhanes_data.csv",
+        default=constants.DEFAULT_NHANES_FILENAME,
         help="Name to save the downloaded file as",
     )
 
@@ -181,49 +213,51 @@ def parse_args():
     impute_parser = subparsers.add_parser(
         "impute", help="Impute missing values in NHANES data using MICE"
     )
-    impute_parser.add_argument(
+    imp_io = impute_parser.add_argument_group("I/O")
+    imp_opt = impute_parser.add_argument_group("Options")
+    imp_io.add_argument(
         "--data-path",
         type=str,
-        default="data/processed/cleaned_nhanes.csv",
+        default=constants.DEFAULT_IMPUTE_DATA_PATH,
         help="Path to the cleaned NHANES dataset",
     )
-    impute_parser.add_argument(
+    imp_io.add_argument(
         "--output-path",
         type=str,
-        default=None,
+        default=constants.DEFAULT_IMPUTE_OUTPUT_PATH,
         help="Path to save the imputed dataset",
     )
-    impute_parser.add_argument(
+    imp_opt.add_argument(
         "--n-imputations",
-        type=int,
+        type=positive_int,
         default=5,
         help="Number of imputations to perform",
     )
-    impute_parser.add_argument(
+    imp_opt.add_argument(
         "--random-state",
         type=int,
         default=42,
         help="Random state for reproducibility",
     )
-    impute_parser.add_argument(
+    imp_opt.add_argument(
         "--n-iterations",
-        type=int,
+        type=positive_int,
         default=5,
         help="Number of iterations for the imputation procedure",
     )
-    impute_parser.add_argument(
+    imp_opt.add_argument(
         "--save-kernel",
         type=bool,
         default=False,
         help="Whether to save the imputation kernel for future use",
     )
-    impute_parser.add_argument(
+    imp_opt.add_argument(
         "--load-kernel",
         type=str,
         default=None,
         help="Path to load an existing imputation kernel from. If provided, this will skip the imputation step.",
     )
-    impute_parser.add_argument(
+    imp_opt.add_argument(
         "--diagnostic-plots",
         type=bool,
         default=False,
@@ -429,6 +463,12 @@ def clean_data(args):
     combined_data = combined_data[columns_to_keep]
     print(f"Combined data shape after filtering: {combined_data.shape}")
 
+    # Validate post-clean schema before saving
+    try:
+        schema.validate_post_clean_schema(combined_data)
+    except Exception as _e:
+        print(f"Warning: post-clean schema validation warning: {_e}")
+
     # Save the cleaned data
     combined_data.to_csv(
         os.path.join(args.output_data, "cleaned_nhanes.csv"), index=True
@@ -622,6 +662,10 @@ def run_plsr_analysis(args):
         valid_cognitive_vars = columns.validate_columns(
             data_df, cognitive_vars, raise_error=False
         )
+        if not valid_cognitive_vars:
+            columns.require_columns(
+                data_df, cognitive_vars, context="PLSR analysis (cognitive variables)"
+            )
         valid_covariates = columns.validate_columns(
             data_df, covariates, raise_error=False
         )
@@ -637,8 +681,7 @@ def run_plsr_analysis(args):
 
         # Get the cognitive variables
         y_original = data_df[valid_cognitive_vars]
-        scaler = StandardScaler().fit(y_original)
-        y = pd.DataFrame(scaler.transform(y_original))
+        y, _ = standardize_targets(y_original)
 
         # Append x and y
         exes.append(x)
@@ -667,25 +710,36 @@ def run_plsr_analysis(args):
                 f"{args.inner_folds} inner folds)..."
             )
 
-        plsr_results = analysis.pls_double_cv(
-            x=x,
-            y=y,
-            n_repeats=args.n_repetitions,
-            max_components=args.max_components,
-            cv2_splits=args.outer_folds,
-            cv1_splits=args.inner_folds,
-        )
-
-        # Save table for this dataset
-        plsr_results["table"].to_csv(
-            os.path.join(dataset_output_dir, "plsr_results_table.csv"), index=False
-        )
+        # Optionally reuse cached CV results table
+        plsr_table_path = os.path.join(dataset_output_dir, "plsr_results_table.csv")
+        plsr_table = None
+        if getattr(args, "use_cache", False) and os.path.exists(plsr_table_path):
+            try:
+                plsr_table = pd.read_csv(plsr_table_path)
+                print(f"Loaded cached PLSR results table from {plsr_table_path}")
+            except Exception:
+                plsr_table = None
+        if plsr_table is None:
+            plsr_results = analysis.pls_double_cv(
+                x=x,
+                y=y,
+                n_repeats=args.n_repetitions,
+                max_components=args.max_components,
+                cv2_splits=args.outer_folds,
+                cv1_splits=args.inner_folds,
+                random_state=args.random_state,
+            )
+            plsr_table = plsr_results["table"]
+            # Save table for this dataset
+            plsr_table.to_csv(plsr_table_path, index=False)
+        # Append the PLSR results table to our list of all tables
+        all_plsr_tables.append(plsr_table)
 
         # Append the PLSR results table to our list of all tables
-        all_plsr_tables.append(plsr_results["table"])
+        # (already appended above, possibly from cache)
 
         # Print information about the final model for this dataset
-        mode = int(plsr_results["table"]["LV"].mode()[0])
+        mode = int(plsr_table["LV"].mode()[0])
         print(
             f"\nThe most repeated number of LV for dataset {dataset_num}: {str(mode)}"
         )
@@ -979,7 +1033,6 @@ def run_trajectory_comparison(args):
     print(f"Trajectory plots saved to {args.output_dir}")
 
     # Transform vectors back to original X matrix values and export to CSV
-    # TODO: how to transform back using five models?
     original_x = trajectory.transform_vectors_to_original(obs_vect,
                                                           x_loadings=x_loadings,
                                                           feature_names=model[0].feature_names_in_)
@@ -996,6 +1049,11 @@ def run_trajectory_comparison(args):
 def main():
     """Main entry point for the CLI."""
     args = parse_args()
+    # Apply a consistent plotting theme once
+    try:
+        apply_theme()
+    except Exception:
+        pass
 
     # Execute the appropriate command
     if args.command == "clean":

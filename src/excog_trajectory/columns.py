@@ -130,3 +130,27 @@ def get_exposure_vars(data: pd.DataFrame,
                      not any(col.startswith(prefix) for prefix in dummy_prefixes)]
 
     return exposure_vars
+
+
+
+def require_columns(data: pd.DataFrame, required: List[str], context: Optional[str] = None) -> None:
+    """Ensure all required columns exist; raise a descriptive error otherwise.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame to check.
+    required : List[str]
+        Required column names.
+    context : Optional[str]
+        Additional context to include in the error message.
+    """
+    missing = [c for c in required if c not in data.columns]
+    if missing:
+        hint = (
+            "Consider running 'excog clean' to generate required columns or check your input file."
+        )
+        msg = f"Missing required columns: {missing}. {hint}"
+        if context:
+            msg = f"{context}: {msg}"
+        raise ValueError(msg)

@@ -747,16 +747,12 @@ def apply_qc_rules(
 
     if log2_transform:
         print("Applying log2 transformation to data...")
-        # Apply log2 transformation to the data
-        eps = 1e-10  # Small value to avoid log2(0)
-        data_qc[vars_passing_qc] = np.log2(data_qc[vars_passing_qc] + eps)
+        data_qc = _apply_log2_transform(data_qc, vars_passing_qc)
 
     # Normalize the data if specified
     if standardize:
         print("Standardizing data by subtracting mean and dividing by standard deviation...")
-        # Normalize the data by subtracting the mean and dividing by the standard deviation
-        scaler = StandardScaler().fit(data_qc[vars_passing_qc])
-        data_qc[vars_passing_qc] = scaler.transform(data_qc[vars_passing_qc])
+        data_qc = _standardize_columns(data_qc, vars_passing_qc)
 
     # Use filter_variables to get the final dataset with both the passing QC variables and the excluded variables
     result = filter_variables(data_qc, vars_passing_qc, ordered_vars)
@@ -914,6 +910,11 @@ def impute_exposure_variables(
         # Load the cleaned NHANES dataset
         print(f"Loading cleaned NHANES data from {data_path}...")
         data = pd.read_csv(data_path, index_col=0).reset_index()
+        try:
+            from excog_trajectory import schema as _schema
+            _schema.validate_pre_impute_schema(data)
+        except Exception as _e:
+            print(f"Warning: pre-impute schema validation warning: {_e}")
 
         # Store sample and Cycle separately if they exist in the data
         sample_data = None
@@ -1012,3 +1013,20 @@ def impute_exposure_variables(
             importance.save("results/feature_importance_mice.png", dpi=300, width=60, height=60, limitsize=False)
 
     return kernel
+
+
+
+def _apply_log2_transform(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
+    """Apply a stable log2 transform to specified columns without mutating input."""
+    result = df.copy()
+    eps = 1e-10
+    result[cols] = np.log2(result[cols] + eps)
+    return result
+
+
+def _standardize_columns(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
+    """Standardize specified columns (z-score) without mutating input."""
+    result = df.copy()
+    scaler = StandardScaler().fit(result[cols])
+    result[cols] = scaler.transform(result[cols])
+    return result
