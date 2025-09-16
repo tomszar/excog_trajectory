@@ -792,6 +792,7 @@ def run_plsr_analysis(args):
             output_dir=dataset_output_dir,
         )
 
+
         print(
             f"PLSR results for dataset {dataset_num} saved to {os.path.join(dataset_output_dir, 'best_model.pkl')}"
         )
@@ -965,6 +966,9 @@ def run_trajectory_comparison(args):
     valid_covariates = columns.validate_columns(df, covariates, raise_error=False)
     covariates_cat = columns.CATEGORICAL_COVARIATES
     cognitive_cat = columns.COGNITIVE_CAT
+    # Cognitive outcome variables used in PLSR
+    cognitive_vars = columns.COGNITIVE_VARS
+    valid_cognitive_vars = columns.validate_columns(df, cognitive_vars, raise_error=False)
     dummy_vars = columns.get_dummy_vars(df_full, covariates_cat)
 
     # Create initial model matrix
@@ -1031,6 +1035,32 @@ def run_trajectory_comparison(args):
         )
 
     print(f"Trajectory plots saved to {args.output_dir}")
+
+    # Create a multi-panel PLSR biplot at the trajectory stage
+    try:
+        # Reconstruct the X matrix used by the model for correct variable ordering/names
+        X = df[model[0].feature_names_in_]
+        # Compute VIP-X scores for coloring
+        vip_x_scores = analysis.calculate_vip_x_scores(model[0], X)
+        visualization.plot_plsr_biplot(
+            model=model[0],
+            X=X,
+            outcome_names=valid_cognitive_vars,
+            output_dir=args.output_dir,
+            vip_scores=vip_x_scores,
+            filename="plsr_biplot_all_components.png",
+        )
+        # Also create the 3D biplot for the first three components
+        visualization.plot_plsr_biplot_3d(
+            model=model[0],
+            X=X,
+            outcome_names=valid_cognitive_vars,
+            output_dir=args.output_dir,
+            filename="plsr_biplot_3d_components_1_2_3.png",
+        )
+        print(f"PLSR biplots (2D and 3D) saved to {args.output_dir}")
+    except Exception as e:
+        print(f"Warning: Failed to create PLSR biplots at trajectory stage: {e}")
 
     # Transform vectors back to original X matrix values and export to CSV
     original_x = trajectory.transform_vectors_to_original(obs_vect,

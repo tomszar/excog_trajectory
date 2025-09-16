@@ -521,6 +521,310 @@ def plot_vip_x_scores(
     return saved_plots
 
 
+def plot_plsr_biplot(
+    model,
+    X: pd.DataFrame,
+    outcome_names: List[str],
+    output_dir: str,
+    vip_series: Optional[pd.Series] = None,
+    filename: str = "plsr_biplot_all_components.png",
+    components: Optional[Tuple[int, int]] = None,
+    top_n_labels: int = 10,
+    exposures_per_plot: int = 25,
+    vip_scores: Optional[pd.DataFrame] = None,
+    dpi: int = 300,
+) -> str:
+    """
+    Create PLSR biplots showing, for each component pair, the relationship between:
+    - Sample scores (gray points)
+    - Exposure variables (blue arrows, colored by VIP intensity if provided)
+    - Outcome variables (red arrows)
+
+    Behavior
+    --------
+    - If `components` is None (default): iterate internally over all pairs (1,2), (3,4), ...
+      and render them as subplots in a single figure. The figure is saved to `filename`.
+    - If `components` is a tuple of two 1-indexed component numbers: render only that pair
+      as a single-axes figure and save to `filename`.
+
+    VIP coloring
+    ------------
+    - If `vip_scores` (DataFrame) is provided, per-plot coloring uses only VIPs for the displayed
+      LVs. For a plot LV i vs LV j, exposures are colored by a per-plot VIP metric computed as
+      max(VIP_i, VIP_j). Each subplot gets its own colorbar with the corresponding VIP scale.
+    - If `vip_scores` is None but `vip_series` is provided, use that single Series for coloring
+      across all subplots (backward-compatible). A colorbar is added to each subplot with the same scale.
+
+    Parameters
+    ----------
+    model : PLSRegression
+        Fitted PLSRegression model with x_scores_, x_loadings_, y_loadings_.
+    X : pd.DataFrame
+        Predictor matrix used to fit the model (for exposure names and ordering).
+    outcome_names : List[str]
+        Names of outcome variables corresponding to y_loadings_.
+    output_dir : str
+        Directory to save the plot.
+    vip_series : Optional[pd.Series]
+        Deprecated in favor of `vip_scores`. If provided (and `vip_scores` is None), exposure arrows
+        are colored by this Series using the Blues colormap.
+    filename : str, default="plsr_biplot_all_components.png"
+        Output filename for the saved figure.
+    components : Optional[Tuple[int, int]], default=None
+        Which components to plot (1-indexed). If None, plot all pairs in one figure.
+    top_n_labels : int, default=10
+        Number of exposure arrows to label (highest VIP in that subplot). All outcomes are labeled.
+    exposures_per_plot : int, default=25
+        Maximum number of exposure arrows to draw per subplot (most relevant by VIP for that subplot).
+    vip_scores : Optional[pd.DataFrame]
+        VIP table as returned by analysis.calculate_vip_x_scores: columns 'Component_1', ..., 'Cumulative'.
+        Index must be exposure names matching X columns.
+    dpi : int, default=300
+        Resolution of the saved figure.
+
+    Returns
+    -------
+    str
+        Path to the saved figure.
+    """
+    # Validate available components
+    n_comp_scores = getattr(model, "x_scores_", np.empty((0, 0))).shape[1]
+    n_comp_xload = getattr(model, "x_loadings_", np.empty((0, 0))).shape[1]
+    n_comp_yload = getattr(model, "y_loadings_", np.empty((0, 0))).shape[1] if hasattr(model, "y_loadings_") else 0
+    max_avail = max(0, min(n_comp_scores, n_comp_xload, n_comp_yload if n_comp_yload > 0 else n_comp_scores))
+    if max_avail < 2:
+        # Need at least two components for a biplot
+        return ""
+
+    exp_names = list(X.columns)
+
+    # Helper to get per-plot VIP values and colors for the specific pair
+    def _pair_vip_and_colors(comp_i_zero: int, comp_j_zero: int):
+        cmap = plt.cm.Blues
+        # Prefer the new combined-subset VIP over the plotted pair (LV_i, LV_j)
+        try:
+            # Lazy import to avoid circular dependencies at module import time
+            from excog_trajectory import analysis as _analysis
+            comb = _analysis.calculate_vip_x_scores(
+                model, X, components=[comp_i_zero + 1, comp_j_zero + 1]
+            )
+            # comb is a single-column DataFrame; align to exposure names
+            aligned = comb.reindex(exp_names)
+            vals = aligned.iloc[:, 0]
+        except Exception:
+            # Backward compatibility and fallbacks
+            if vip_scores is not None:
+                aligned = vip_scores.reindex(exp_names)
+                ci = f"Component_{comp_i_zero + 1}"
+                cj = f"Component_{comp_j_zero + 1}"
+                vals_i = aligned[ci] if ci in aligned.columns else None
+                vals_j = aligned[cj] if cj in aligned.columns else None
+                if vals_i is None and vals_j is None:
+                    vals = (
+                        aligned["Cumulative"]
+                        if "Cumulative" in aligned.columns
+                        else pd.Series(1.0, index=exp_names)
+                    )
+                elif vals_i is None:
+                    vals = vals_j
+                elif vals_j is None:
+                    vals = vals_i
+                else:
+                    # Previous behavior: max across the two components
+                    vals = pd.concat([vals_i, vals_j], axis=1).max(axis=1)
+            elif vip_series is not None:
+                vals = pd.Series(vip_series, index=exp_names)
+            else:
+                vals = pd.Series(1.0, index=exp_names)
+
+        # Handle missing values
+        if vals.isna().any():
+            fill_val = float(np.nanmin(vals.values)) if np.any(~np.isnan(vals.values)) else 0.0
+            vals = vals.fillna(fill_val)
+
+        # Determine which exposures to draw (top by VIP for this pair)
+        k = min(exposures_per_plot, len(exp_names))
+        order = np.argsort(-vals.values)
+        top_idx = list(order[:k])
+
+        # Normalize colors based on the values of the drawn exposures
+        if len(top_idx) > 0:
+            vmin = float(vals.values[top_idx].min())
+            vmax = float(vals.values[top_idx].max())
+            if np.isclose(vmin, vmax):
+                vmin = vmax - 1e-6
+            norm = plt.Normalize(vmin=vmin, vmax=vmax)
+            colors = {idx: cmap(norm(vals.iloc[idx])) for idx in top_idx}
+            sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+            sm.set_array([])
+        else:
+            colors = {}
+            sm = None
+
+        # Determine which of the drawn exposures to label
+        label_count = min(top_n_labels, len(top_idx))
+        label_idx = set(top_idx[:label_count])
+
+        return vals, top_idx, colors, sm
+
+    def _draw_pair(ax, comp_i_zero: int, comp_j_zero: int):
+        # Slice scores and loadings for the given pair (0-indexed)
+        scores = model.x_scores_[:, [comp_i_zero, comp_j_zero]]
+        x_load = model.x_loadings_[:, [comp_i_zero, comp_j_zero]]
+        y_load = model.y_loadings_[:, [comp_i_zero, comp_j_zero]] if hasattr(model, "y_loadings_") else None
+
+        # VIP for this pair
+        vals, draw_indices, color_map, sm = _pair_vip_and_colors(comp_i_zero, comp_j_zero)
+
+        # Scale arrows to fit the score space for this pair
+        max_score = float(np.max(np.abs(scores))) if scores.size > 0 else 1.0
+        mats = [x_load]
+        if y_load is not None:
+            mats.append(y_load)
+        max_loading_vec = max(
+            1e-12 + max(
+                float(np.max(np.sqrt(np.sum(m**2, axis=1)))) if m.size > 0 else 0.0
+                for m in mats
+            ),
+            1e-6,
+        )
+        arrow_scale = (max_score * 0.9) / max_loading_vec
+
+        # Scatter sample scores
+        ax.scatter(
+            scores[:, 0],
+            scores[:, 1],
+            color="lightgray",
+            alpha=0.3,
+            s=12,
+            label="Samples"
+        )
+
+        # Draw exposure arrows and labels (only top exposures for this pair)
+        for idx in draw_indices:
+            name = exp_names[idx]
+            dx, dy = arrow_scale * x_load[idx, 0], arrow_scale * x_load[idx, 1]
+            ax.arrow(
+                0,
+                0,
+                dx,
+                dy,
+                color=color_map.get(idx, "#1f77b4"),
+                alpha=0.9,
+                width=0.001,
+                head_width=0.1,
+                head_length=0.1,
+                length_includes_head=True,
+            )
+        # Label only the top_n among drawn exposures
+        label_count = min(top_n_labels, len(draw_indices))
+        for idx in draw_indices[:label_count]:
+            name = exp_names[idx]
+            dx, dy = arrow_scale * x_load[idx, 0], arrow_scale * x_load[idx, 1]
+            ax.text(
+                dx * 1.05,
+                dy * 1.05,
+                name,
+                fontsize=9,
+                ha="center",
+                va="center",
+                color=color_map.get(idx, "#1f77b4"),
+                bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
+            )
+
+        # Draw outcome arrows and labels
+        if y_load is not None and len(outcome_names) == y_load.shape[0]:
+            for jdx, oname in enumerate(outcome_names):
+                dx, dy = arrow_scale * y_load[jdx, 0], arrow_scale * y_load[jdx, 1]
+                ax.arrow(
+                    0,
+                    0,
+                    dx,
+                    dy,
+                    fc="red",
+                    ec="red",
+                    alpha=0.9,
+                    width=0.001,
+                    head_width=0.1,
+                    head_length=0.1,
+                    length_includes_head=True,
+                )
+                ax.text(
+                    dx * 1.05,
+                    dy * 1.05,
+                    oname,
+                    fontsize=10,
+                    ha="center",
+                    va="center",
+                    color="darkred",
+                    fontweight="bold",
+                    bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
+                )
+
+        # Axes through origin and labels
+        ax.axhline(0, color="black", linewidth=0.7, alpha=0.7)
+        ax.axvline(0, color="black", linewidth=0.7, alpha=0.7)
+        ax.set_xlabel(f"LV{comp_i_zero + 1}")
+        ax.set_ylabel(f"LV{comp_j_zero + 1}")
+        ax.set_title(f"Exposures and outcomes in latent space (LV{comp_i_zero + 1} vs LV{comp_j_zero + 1})")
+        ax.grid(True, linestyle="--", alpha=0.3)
+        ax.set_aspect("equal", adjustable="datalim")
+
+        # Add per-axes colorbar if VIP available
+        if sm is not None:
+            cbar = plt.colorbar(sm, ax=ax, fraction=0.046, pad=0.04)
+            cbar.set_label(f"VIP (LV{comp_i_zero + 1} + LV{comp_j_zero + 1})")
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # If a specific pair is requested, render a single-axes figure
+    if components is not None:
+        comp_i = max(0, min(max_avail - 1, components[0] - 1))
+        comp_j = max(0, min(max_avail - 1, components[1] - 1))
+        if comp_i == comp_j:
+            # Ensure two distinct components
+            comp_j = min(max_avail - 1, comp_i + 1)
+        fig, ax = plt.subplots(figsize=(8, 8))
+        _draw_pair(ax, comp_i, comp_j)
+        out_path = os.path.join(output_dir, filename)
+        plt.tight_layout()
+        plt.savefig(out_path, dpi=dpi)
+        plt.close(fig)
+        return out_path
+
+    # Otherwise, render all pairs as subplots in a single figure
+    n_components = max_avail
+    n_plots = int(np.ceil(n_components / 2))
+    n_rows = int(np.ceil(n_plots / 2))  # 2 plots per row
+    n_cols = 2
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(8 * n_cols, 6 * n_rows))
+
+    # Flatten axes for easy indexing
+    axes = np.atleast_1d(axes).flatten()
+
+    for plot_idx in range(n_plots):
+        if plot_idx == n_plots - 1 and n_components % 2 == 1:
+            # Odd number of components: last plot is (n-1, n)
+            comp_i = n_components - 2
+            comp_j = n_components - 1
+        else:
+            comp_i = plot_idx * 2
+            comp_j = plot_idx * 2 + 1
+        if plot_idx < len(axes):
+            _draw_pair(axes[plot_idx], comp_i, comp_j)
+
+    # Remove any unused subplots
+    for idx in range(n_plots, len(axes)):
+        fig.delaxes(axes[idx])
+
+    fig.suptitle("PLSR biplots across component pairs", fontsize=14)
+    out_path = os.path.join(output_dir, filename)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+    return out_path
+
+
 def plot_cognitive_trajectory(
         x_scores: pd.DataFrame,
         obs_vect: pd.DataFrame,
@@ -529,6 +833,7 @@ def plot_cognitive_trajectory(
         figsize_2d: Tuple[int, int] = (20, 16),
         figsize_3d: Tuple[int, int] = (12, 10),
         dpi: int = 300,
+        factor: int = 2,
 ) -> Dict[str, List[str]]:
     """
     Create 2D and 3D plots for cognitive trajectory by sex using obs_vect.
@@ -548,6 +853,8 @@ def plot_cognitive_trajectory(
         Figure size (width, height) in inches for 3D plot
     dpi : int, default=300
         Resolution of the figure in dots per inch
+    factor : int, default=2
+        Factor to multiply the x and y scores for better visualization
 
     Returns
     -------
@@ -601,7 +908,8 @@ def plot_cognitive_trajectory(
                     x_scores.iloc[:, comp_i],
                     x_scores.iloc[:, comp_j],
                     color='lightgray',
-                    alpha=0.1
+                    alpha=0.3,
+                    s=12,
                 )
 
                 # For each sex
@@ -621,8 +929,8 @@ def plot_cognitive_trajectory(
                         row_idx = start_idx + cat_idx
 
                         # Get the x and y coordinates from obs_vect
-                        x_coord = obs_vect.iloc[row_idx, comp_i]
-                        y_coord = obs_vect.iloc[row_idx, comp_j]
+                        x_coord = obs_vect.iloc[row_idx, comp_i] * factor
+                        y_coord = obs_vect.iloc[row_idx, comp_j] * factor
 
                         # Store coordinates for connecting lines
                         line_points_x.append(x_coord)
@@ -661,8 +969,8 @@ def plot_cognitive_trajectory(
                 ax.grid(True, linestyle='--', alpha=0.3)
 
                 # Set x and y axis limits
-                ax.set_xlim([-1.5, 1.5])
-                ax.set_ylim([-1.5, 1.5])
+                # ax.set_xlim([-1.5, 1.5])
+                # ax.set_ylim([-1.5, 1.5])
 
                 # Add legend only to the first subplot
                 if plot_idx == 0:
@@ -673,10 +981,10 @@ def plot_cognitive_trajectory(
         fig.delaxes(axes[idx])
 
     # Add overall title
-    fig.suptitle('Cognitive Trajectory by Sex (Selected Component Pairs)', fontsize=16)
+    fig.suptitle("Cognitive Trajectory by Sex")
 
     # Save the plot
-    plt.tight_layout(rect=[0, 0, 0.95, 0.95])
+    plt.tight_layout()
     plot_path = os.path.join(output_dir, filename + "_2d.png")
     plt.savefig(plot_path, dpi=dpi)
     plt.close()
@@ -716,9 +1024,9 @@ def plot_cognitive_trajectory(
                 row_idx = start_idx + cat_idx
 
                 # Get the x, y, and z coordinates from obs_vect
-                x_coord = obs_vect.iloc[row_idx, 0]
-                y_coord = obs_vect.iloc[row_idx, 1]
-                z_coord = obs_vect.iloc[row_idx, 2]
+                x_coord = obs_vect.iloc[row_idx, 0] * factor
+                y_coord = obs_vect.iloc[row_idx, 1] * factor
+                z_coord = obs_vect.iloc[row_idx, 2] * factor
 
                 # Store coordinates for connecting lines
                 line_points_x.append(x_coord)
@@ -761,9 +1069,9 @@ def plot_cognitive_trajectory(
         ax.legend(loc='best')
 
         # Set axis limits
-        ax.set_xlim([-1.5, 1.5])
-        ax.set_ylim([-1.5, 1.5])
-        ax.set_zlim([-1.5, 1.5])
+        # ax.set_xlim([-1.5, 1.5])
+        # ax.set_ylim([-1.5, 1.5])
+        # ax.set_zlim([-1.5, 1.5])
 
         # Save the plot
         plt.tight_layout()
@@ -775,3 +1083,200 @@ def plot_cognitive_trajectory(
         saved_plots["plots"].append(plot_path)
 
     return saved_plots
+
+
+
+def plot_plsr_biplot_3d(
+    model,
+    X: pd.DataFrame,
+    outcome_names: List[str],
+    output_dir: str,
+    filename: str = "plsr_biplot_3d_components_1_2_3.png",
+    exposures_per_plot: int = 25,
+    top_n_labels: int = 10,
+    vip_scores: Optional[pd.DataFrame] = None,
+    dpi: int = 300,
+) -> str:
+    """
+    Create a 3D PLSR biplot using the first three latent variables (LV1, LV2, LV3).
+
+    The plot shows:
+    - Sample scores (gray points)
+    - Exposure variables (arrows colored by combined VIP over LV1+LV2+LV3)
+    - Outcome variables (red arrows)
+
+    VIP handling
+    ------------
+    - By default, VIP coloring is computed as the combined VIP over components [1, 2, 3]
+      using analysis.calculate_vip_x_scores. If that fails, falls back to provided vip_scores
+      (combining columns Component_1..Component_3 if present) or uniform coloring.
+
+    Parameters
+    ----------
+    model : PLSRegression
+        Fitted PLSRegression model with x_scores_, x_loadings_, y_loadings_.
+    X : pd.DataFrame
+        Predictor matrix used to fit the model (for exposure names and ordering).
+    outcome_names : List[str]
+        Names of outcome variables corresponding to y_loadings_.
+    output_dir : str
+        Directory where to save the figure.
+    filename : str, default="plsr_biplot_3d_components_1_2_3.png"
+        Output filename.
+    exposures_per_plot : int, default=25
+        Maximum number of exposure arrows to draw (top by VIP).
+    top_n_labels : int, default=10
+        Number of exposure labels to annotate among the drawn set.
+    vip_scores : Optional[pd.DataFrame]
+        Optional precomputed VIP table with columns 'Component_1', 'Component_2', 'Component_3', ...
+    dpi : int, default=300
+        Figure DPI.
+
+    Returns
+    -------
+    str
+        Path to saved file, or empty string if fewer than 3 components are available.
+    """
+    # Validate available components (need at least 3)
+    n_comp_scores = getattr(model, "x_scores_", np.empty((0, 0))).shape[1]
+    n_comp_xload = getattr(model, "x_loadings_", np.empty((0, 0))).shape[1]
+    n_comp_yload = (
+        getattr(model, "y_loadings_", np.empty((0, 0))).shape[1]
+        if hasattr(model, "y_loadings_")
+        else 0
+    )
+    max_avail = max(0, min(n_comp_scores, n_comp_xload, n_comp_yload if n_comp_yload > 0 else n_comp_scores))
+    if max_avail < 3:
+        return ""
+
+    exp_names = list(X.columns)
+
+    # Compute combined VIP over components 1,2,3
+    def _vip123() -> pd.Series:
+        try:
+            from excog_trajectory import analysis as _analysis
+
+            comb = _analysis.calculate_vip_x_scores(model, X, components=[1, 2, 3])
+            aligned = comb.reindex(exp_names)
+            vals = aligned.iloc[:, 0]
+        except Exception:
+            if vip_scores is not None:
+                aligned = vip_scores.reindex(exp_names)
+                cols = [c for c in ["Component_1", "Component_2", "Component_3"] if c in aligned.columns]
+                if cols:
+                    vals = np.sqrt(np.sum(aligned[cols] ** 2, axis=1) / max(len(cols), 1))
+                elif "Cumulative" in aligned.columns:
+                    vals = aligned["Cumulative"]
+                else:
+                    vals = pd.Series(1.0, index=exp_names)
+            else:
+                vals = pd.Series(1.0, index=exp_names)
+        # Handle NaNs
+        if vals.isna().any():
+            fill_val = float(np.nanmin(vals.values)) if np.any(~np.isnan(vals.values)) else 0.0
+            vals = vals.fillna(fill_val)
+        return vals
+
+    vip_vals = _vip123()
+
+    # Determine which exposures to draw (top by VIP)
+    k = min(exposures_per_plot, len(exp_names))
+    order = np.argsort(-vip_vals.values)
+    draw_indices = list(order[:k])
+
+    # Normalize colors based on drawn exposures
+    cmap = plt.cm.Blues
+    if draw_indices:
+        vmin = float(vip_vals.values[draw_indices].min())
+        vmax = float(vip_vals.values[draw_indices].max())
+        if np.isclose(vmin, vmax):
+            vmin = vmax - 1e-6
+        norm = plt.Normalize(vmin=vmin, vmax=vmax)
+        colors = {idx: cmap(norm(vip_vals.iloc[idx])) for idx in draw_indices}
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+    else:
+        colors = {}
+        sm = None
+
+    # Slice scores and loadings for the first three components (0-indexed)
+    scores = model.x_scores_[:, [0, 1, 2]]
+    x_load = model.x_loadings_[:, [0, 1, 2]]
+    y_load = model.y_loadings_[:, [0, 1, 2]] if hasattr(model, "y_loadings_") else None
+
+    # Compute scaling so arrows fit within score space
+    # Use max score radius in 3D
+    max_score = float(np.max(np.sqrt(np.sum(scores**2, axis=1)))) if scores.size > 0 else 1.0
+    mats = [x_load]
+    if y_load is not None and y_load.size > 0:
+        mats.append(y_load)
+    max_loading_vec = max(
+        1e-12
+        + max(
+            float(np.max(np.sqrt(np.sum(m**2, axis=1)))) if m.size > 0 else 0.0
+            for m in mats
+        ),
+        1e-6,
+    )
+    arrow_scale = (max_score * 0.9) / max_loading_vec
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection="3d")
+
+    # Scatter sample scores
+    ax.scatter(scores[:, 0], scores[:, 1], scores[:, 2], color="lightgray", alpha=0.05, s=12, label="Samples")
+
+    # Draw exposure arrows
+    for idx in draw_indices:
+        name = exp_names[idx]
+        dx, dy, dz = arrow_scale * x_load[idx, 0], arrow_scale * x_load[idx, 1], arrow_scale * x_load[idx, 2]
+        ax.quiver(0, 0, 0, dx, dy, dz, color=colors.get(idx, "#1f77b4"), alpha=0.9, arrow_length_ratio=0.08, linewidth=1.0)
+
+    # Label top exposures among drawn
+    label_count = min(top_n_labels, len(draw_indices))
+    for idx in draw_indices[:label_count]:
+        name = exp_names[idx]
+        dx, dy, dz = arrow_scale * x_load[idx, 0], arrow_scale * x_load[idx, 1], arrow_scale * x_load[idx, 2]
+        ax.text(dx * 1.05, dy * 1.05, dz * 1.05, name, fontsize=9, ha="center", va="center",
+                color=colors.get(idx, "#1f77b4"))
+
+    # Draw outcome arrows and labels
+    if y_load is not None and len(outcome_names) == y_load.shape[0]:
+        for jdx, oname in enumerate(outcome_names):
+            dx, dy, dz = arrow_scale * y_load[jdx, 0], arrow_scale * y_load[jdx, 1], arrow_scale * y_load[jdx, 2]
+            ax.quiver(0, 0, 0, dx, dy, dz, color="red", alpha=0.9, arrow_length_ratio=0.08, linewidth=1.2)
+            ax.text(dx * 1.05, dy * 1.05, dz * 1.05, oname, fontsize=10, ha="center", va="center", color="darkred")
+
+    # Axis labels and title
+    ax.set_xlabel("LV1")
+    ax.set_ylabel("LV2")
+    ax.set_zlabel("LV3")
+    ax.set_title("PLSR biplot (LV1 vs LV2 vs LV3)")
+
+    # Set symmetric limits around 0 based on data and arrows
+    all_extent = [scores[:, 0].max(), scores[:, 1].max(), scores[:, 2].max(),
+                  scores[:, 0].min(), scores[:, 1].min(), scores[:, 2].min()]
+    arrow_extents = []
+    for mat in [x_load, y_load] if y_load is not None else [x_load]:
+        if mat is None:
+            continue
+        arrow_extents.extend(list(arrow_scale * mat[:, 0]))
+        arrow_extents.extend(list(arrow_scale * mat[:, 1]))
+        arrow_extents.extend(list(arrow_scale * mat[:, 2]))
+    lim = max(1e-6, np.max(np.abs(np.array(all_extent + arrow_extents))))
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.set_zlim(-lim, lim)
+
+    # Add colorbar for VIP if available
+    if sm is not None:
+        cbar = fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label("VIP (LV1 + LV2 + LV3)")
+
+    out_path = os.path.join(output_dir, filename)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+    return out_path

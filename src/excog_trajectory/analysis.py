@@ -178,13 +178,20 @@ def _plsda_r2(
     return r2_score
 
 
-def calculate_vip_x_scores(model: PLSRegression, X: pd.DataFrame) -> pd.DataFrame:
+def calculate_vip_x_scores(
+    model: PLSRegression,
+    X: pd.DataFrame,
+    components: Union[int, List[int], None] = None,
+) -> pd.DataFrame:
     """
     Calculate VIP-X scores (Variable Importance in Projection for X) from a fitted PLSRegression model.
 
     VIP-X scores measure the contribution of each predictor variable to the PLS model.
-    The function calculates both cumulative VIP-X scores across all components and
-    individual VIP-X scores for each component.
+    This function supports two modes:
+      - Full table (default): returns VIP per component and a cumulative VIP across all components.
+      - Subset mode: when `components` is provided (1-indexed ints), returns a single-column
+        DataFrame with the VIP combined over the specified subset of components using the standard
+        SSX-weighted formula restricted to that subset.
 
     Parameters
     ----------
@@ -192,12 +199,17 @@ def calculate_vip_x_scores(model: PLSRegression, X: pd.DataFrame) -> pd.DataFram
         A fitted PLSRegression model
     X : pd.DataFrame
         The predictor variables used to fit the model
+    components : Union[int, List[int], None]
+        1-indexed component number or list of component numbers over which to combine VIP.
+        If None, returns the full table (per-component + cumulative) for all components.
 
     Returns
     -------
     pd.DataFrame
-        DataFrame containing VIP-X scores for each predictor variable per component
-        and the overall cumulative score
+        - If components is None: DataFrame containing VIP-X scores for each predictor variable per
+          component (columns 'Component_1', ...) and the overall 'Cumulative' score.
+        - If components is an int or list of ints: DataFrame with a single column named
+          'Combined_<c1>_<c2>_...' containing the VIP-X score combined over that subset.
     """
     # Get model parameters
     n_components = model.n_components
@@ -208,31 +220,59 @@ def calculate_vip_x_scores(model: PLSRegression, X: pd.DataFrame) -> pd.DataFram
     loadings = model.x_loadings_
     weights = model.x_weights_
 
-    # Calculate variance explained in X by each component
+    # Calculate variance explained in X by each component (SSX)
     # This is proportional to the sum of squares of the X-loadings
-    ss_loadings = np.sum(loadings**2, axis=0)
+    ss_loadings = np.sum(loadings ** 2, axis=0)
 
-    # Initialize DataFrame to store VIP-X scores
+    # If a subset of components is specified, compute the SSX-weighted VIP over that subset
+    if components is not None:
+        # Normalize and validate components as a sorted unique list of 1-indexed ints
+        if isinstance(components, int):
+            comp_list = [components]
+        else:
+            comp_list = list(components)
+        # Keep only valid components within [1, n_components]
+        comp_list = sorted({int(c) for c in comp_list if 1 <= int(c) <= n_components})
+        if len(comp_list) == 0:
+            # If nothing valid provided, fall back to full table
+            comp_list = list(range(1, n_components + 1))
+        # Convert to 0-indexed
+        comp_idx = [c - 1 for c in comp_list]
+
+        denom = float(np.sum(ss_loadings[comp_idx]))
+        if denom <= 0:
+            denom = 1.0
+        # Vectorized computation of VIP over subset
+        # weights: (p x A); ss_loadings: (A,)
+        # Compute numerator per feature j: sum_a(w_ja^2 * SSX_a) over subset
+        w_subset = weights[:, comp_idx]  # (p x k)
+        ss_subset = ss_loadings[comp_idx]  # (k,)
+        # (p,) via (p x k) * (k,) broadcasting, sum over axis=1
+        numerator = np.sum((w_subset ** 2) * ss_subset, axis=1)
+        vip_subset = np.sqrt(n_features * numerator / denom)
+
+        col_name = 'Combined_' + '_'.join(str(c) for c in comp_list)
+        vip_df = pd.DataFrame(vip_subset, index=feature_names, columns=[col_name])
+        return vip_df
+
+    # Default behavior: full table with per-component VIP and cumulative
     vip_scores = pd.DataFrame(index=feature_names)
 
-    # Calculate VIP-X scores for each component
+    # Calculate VIP-X scores for each component (per-component, normalized by sum of squared weights)
     for comp in range(n_components):
-        # Calculate VIP-X for this component
-        vip_comp = np.sqrt(n_features * (weights[:, comp]**2) / np.sum(weights[:, comp]**2))
-        vip_scores[f'Component_{comp+1}'] = vip_comp
+        vip_comp = np.sqrt(
+            n_features * (weights[:, comp] ** 2) / max(float(np.sum(weights[:, comp] ** 2)), 1e-12)
+        )
+        vip_scores[f"Component_{comp + 1}"] = vip_comp
 
-    # Calculate cumulative VIP-X scores across all components
-    # Using the formula: VIP_j = sqrt(p * sum_a(w_aj^2 * SSX_a) / sum_a(SSX_a))
-    vip_cumulative = np.zeros(n_features)
+    # Calculate cumulative VIP-X scores across all components (SSX-weighted)
+    denom_all = float(np.sum(ss_loadings))
+    if denom_all <= 0:
+        denom_all = 1.0
+    numerator_all = np.sum((weights ** 2) * ss_loadings[np.newaxis, :], axis=1)
+    vip_cumulative = np.sqrt(n_features * numerator_all / denom_all)
 
-    for j in range(n_features):
-        numerator = 0
-        for a in range(n_components):
-            numerator += weights[j, a]**2 * ss_loadings[a]
-
-        vip_cumulative[j] = np.sqrt(n_features * numerator / np.sum(ss_loadings))
-
-    vip_scores['Cumulative'] = vip_cumulative
+    vip_scores["Cumulative"] = vip_cumulative
 
     return vip_scores
 
