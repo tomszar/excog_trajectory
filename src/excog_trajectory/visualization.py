@@ -695,8 +695,8 @@ def plot_plsr_biplot(
             scores[:, 0],
             scores[:, 1],
             color="lightgray",
-            alpha=0.3,
-            s=12,
+            alpha=0.1,
+            s=10,
             label="Samples"
         )
 
@@ -830,10 +830,8 @@ def plot_cognitive_trajectory(
         obs_vect: pd.DataFrame,
         output_dir: str,
         filename: str = "cognitive_trajectory",
-        figsize_2d: Tuple[int, int] = (20, 16),
-        figsize_3d: Tuple[int, int] = (12, 10),
         dpi: int = 300,
-        factor: int = 2,
+        factor: int = 3,
 ) -> Dict[str, List[str]]:
     """
     Create 2D and 3D plots for cognitive trajectory by sex using obs_vect.
@@ -847,13 +845,11 @@ def plot_cognitive_trajectory(
         using a linear regression that accommodates the inclusion of covariates
     output_dir : str
         Directory to save the plots
-    figsize_2d : tuple of int, default=(20, 16)
-        Figure size (width, height) in inches for 2D plots
-    figsize_3d : tuple of int, default=(12, 10)
-        Figure size (width, height) in inches for 3D plot
+    filename :  str, default="cognitive_trajectory"
+        Name of the output file
     dpi : int, default=300
         Resolution of the figure in dots per inch
-    factor : int, default=2
+    factor : int, default=3
         Factor to multiply the x and y scores for better visualization
 
     Returns
@@ -868,6 +864,7 @@ def plot_cognitive_trajectory(
     n_components = obs_vect.shape[1]
     n_plots = int(np.ceil(n_components / 2))
     n_rows = int(np.ceil(n_plots / 2))  # 2 plots per row
+    n_cols = 2
 
     # Define cognitive categories and sex labels
     cognitive_categories = ["Low", "Average", "High"]
@@ -878,7 +875,7 @@ def plot_cognitive_trajectory(
     markers = {'Female': 'o', 'Male': 's'}  # circle for females, square for males
 
     # Create 2D plots
-    fig, axes = plt.subplots(n_rows, 2, figsize=figsize_2d)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(8 * n_cols, 6 * n_rows))
 
     # Handle case where there's only one plot
     if n_plots == 1:
@@ -908,8 +905,8 @@ def plot_cognitive_trajectory(
                     x_scores.iloc[:, comp_i],
                     x_scores.iloc[:, comp_j],
                     color='lightgray',
-                    alpha=0.3,
-                    s=12,
+                    alpha=0.1,
+                    s=10,
                 )
 
                 # For each sex
@@ -994,7 +991,7 @@ def plot_cognitive_trajectory(
 
     # Create 3D plot if we have at least 3 components
     if n_components >= 3:
-        fig = plt.figure(figsize=figsize_3d)
+        fig = plt.figure(figsize=(8 * n_cols, 6 * n_rows))
         ax = fig.add_subplot(111, projection='3d')
 
         # Plot all points with low alpha for context
@@ -1003,7 +1000,7 @@ def plot_cognitive_trajectory(
             x_scores.iloc[:, 1],
             x_scores.iloc[:, 2],
             color='lightgray',
-            alpha=0.1
+            alpha=0.05
         )
 
         # For each sex
@@ -1226,7 +1223,7 @@ def plot_plsr_biplot_3d(
     ax = fig.add_subplot(111, projection="3d")
 
     # Scatter sample scores
-    ax.scatter(scores[:, 0], scores[:, 1], scores[:, 2], color="lightgray", alpha=0.05, s=12, label="Samples")
+    ax.scatter(scores[:, 0], scores[:, 1], scores[:, 2], color="lightgray", alpha=0.05, s=9, label="Samples")
 
     # Draw exposure arrows
     for idx in draw_indices:
