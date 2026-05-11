@@ -817,7 +817,7 @@ def plot_plsr_biplot(
     for idx in range(n_plots, len(axes)):
         fig.delaxes(axes[idx])
 
-    fig.suptitle("PLSR biplots across component pairs", fontsize=14)
+    fig.suptitle("PLSR biplots across latent variable pairs", fontsize=14)
     out_path = os.path.join(output_dir, filename)
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.savefig(out_path, dpi=dpi)
@@ -958,9 +958,12 @@ def plot_cognitive_trajectory(
                     )
 
                 # Add labels
-                ax.set_xlabel(f'Component {comp_i + 1}')
-                ax.set_ylabel(f'Component {comp_j + 1}')
-                ax.set_title(f'Components {comp_i + 1} vs {comp_j + 1}')
+                ax.axhline(0, color='black', linewidth=0.7, alpha=0.7)
+                ax.axvline(0, color='black', linewidth=0.7, alpha=0.7)
+                ax.set_xlabel(f'LV{comp_i + 1}')
+                ax.set_ylabel(f'LV{comp_j + 1}')
+                ax.set_title(f'LV{comp_i + 1} vs LV{comp_j + 1}')
+                ax.set_aspect('equal')
 
                 # Add a grid
                 ax.grid(True, linestyle='--', alpha=0.3)
@@ -1057,9 +1060,9 @@ def plot_cognitive_trajectory(
             )
 
         # Add labels
-        ax.set_xlabel('Component 1')
-        ax.set_ylabel('Component 2')
-        ax.set_zlabel('Component 3')
+        ax.set_xlabel('LV1')
+        ax.set_ylabel('LV2')
+        ax.set_zlabel('LV3')
         ax.set_title('Cognitive Trajectory by Sex (3D)')
 
         # Add a legend
